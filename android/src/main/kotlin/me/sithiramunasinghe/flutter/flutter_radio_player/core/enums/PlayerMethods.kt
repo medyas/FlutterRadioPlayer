@@ -13,5 +13,6 @@ enum class PlayerMethods(val value: String) {
     SET_TITLE("setTitle"),
     SET_URL("setUrl"),
     IS_PLAYING("isPlaying"),
-    SET_VOLUME("setVolume")
+    SET_VOLUME("setVolume"),
+    RE_EMMIT_STATES("reEmmitStates")
 }

@@ -123,6 +123,9 @@ class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware
 
                 setUrl(url, playWhenReady)
             }
+            PlayerMethods.RE_EMMIT_STATES.value -> {
+                launchPlayerIntentWithAction(StreamingCore.ACTION_RE_EMMIT_EVENTS)
+            }
             else -> result.notImplemented()
         }
 

@@ -79,6 +79,10 @@ class FlutterRadioPlayer {
     });
   }
 
+  Future<void> reEmmitStates() async {
+    await _channel.invokeMethod("reEmmitStates");
+  }
+
   /// Get the player stream.
   Stream<String?>? get isPlayingStream {
     if (_isPlayingStream == null) {

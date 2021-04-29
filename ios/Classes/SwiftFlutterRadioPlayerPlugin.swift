@@ -113,6 +113,9 @@ public class SwiftFlutterRadioPlayerPlugin: NSObject, FlutterPlugin {
                 streamingCore.setUrl(streamURL: streamURL, playWhenReady: playWhenReady)
             }
             result(nil)
+        case "reEmmitStates":
+            result(nil)
+
         default:
             result(nil)
         }
