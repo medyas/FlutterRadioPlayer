@@ -8,7 +8,8 @@
     <!--  Services for the plugin  -->
     <application android:usesCleartextTraffic="true"
         android:supportsRtl="true">
-        <service android:name=".core.StreamingCore"/>
+        <!-- android:stopWithTask="true" -->
+        <service android:name=".core.StreamingCore" />
     </application>
 </manifest>
 

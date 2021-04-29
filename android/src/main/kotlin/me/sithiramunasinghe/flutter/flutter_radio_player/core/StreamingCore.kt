@@ -100,7 +100,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
         if (intent != null) {
             when (intent.action) {
                 ACTION_INIT_PLAYER -> {
-                    if (player != null && isPlaying()) {
+                    if (player != null/* && isPlaying()*/) {
                         reEmmitEvents()
                         Handler(Looper.getMainLooper()).postDelayed({ reEmmitEvents() }, 1500)
                         return START_STICKY
