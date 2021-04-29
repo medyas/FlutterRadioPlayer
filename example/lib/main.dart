@@ -113,8 +113,9 @@ class _MyAppState extends State<MyApp> {
                     children: [
                       Slider(
                         value: volume,
-                        min: 0,
-                        max: 1.0,
+                      min: 0.0,
+                      max: 1.0,
+                      divisions: 10,
                         onChanged: (value) =>
                             _flutterRadioPlayer.setVolume(value),
                       ),
