@@ -156,7 +156,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
         } else {
             audioManager!!.requestAudioFocus(this, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
         }
-//        player?.seekToDefaultPosition()
+        player?.seekToDefaultPosition()
         player?.playWhenReady = true
         wasPlaying = false
     }
