@@ -66,7 +66,8 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
 
     companion object {
 
-        const val MANIFEST_NOTIFICATION_ICON = "flutter.radio.player.notification.placeholder"
+        const val MANIFEST_NOTIFICATION_PLACEHOLDER = "flutter.radio.player.notification.placeholder"
+        const val MANIFEST_NOTIFICATION_ICON = "flutter.radio.player.notification.icon"
 
         private const val mediaSessionId = "streaming_audio_player_media_session"
         private const val playbackChannelId = "streaming_audio_player_channel_id"
@@ -357,7 +358,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
                             loadCoverImageFromUrl(coverImageUrl, callback)
                         }
 
-                        return loadLocalBitmap(MANIFEST_NOTIFICATION_ICON)
+                        return loadLocalBitmap(MANIFEST_NOTIFICATION_PLACEHOLDER)
                     }
 
                 },
@@ -384,7 +385,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
                 .into(object : CustomTarget<Bitmap>() {
                     override fun onLoadFailed(errorDrawable: Drawable?) {
                         try {
-                            val placeHolder = loadLocalBitmap(MANIFEST_NOTIFICATION_ICON)
+                            val placeHolder = loadLocalBitmap(MANIFEST_NOTIFICATION_PLACEHOLDER)
                             if (placeHolder != null) {
                                 callback.onBitmap(placeHolder)
                             } else {
