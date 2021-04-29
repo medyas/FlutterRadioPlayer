@@ -9,7 +9,6 @@ import android.graphics.BitmapFactory
 import android.graphics.drawable.Drawable
 import android.media.AudioFocusRequest
 import android.media.AudioManager
-import android.media.audiofx.AudioEffect
 import android.media.session.MediaSession
 import android.net.Uri
 import android.os.*
@@ -20,7 +19,6 @@ import com.bumptech.glide.Glide
 import com.bumptech.glide.request.target.CustomTarget
 import com.google.android.exoplayer2.*
 import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector
-import com.google.android.exoplayer2.metadata.icy.IcyHeaders
 import com.google.android.exoplayer2.metadata.icy.IcyInfo
 import com.google.android.exoplayer2.source.MediaSource
 import com.google.android.exoplayer2.source.ProgressiveMediaSource
@@ -33,7 +31,7 @@ import me.sithiramunasinghe.flutter.flutter_radio_player.FlutterRadioPlayerPlugi
 import me.sithiramunasinghe.flutter.flutter_radio_player.FlutterRadioPlayerPlugin.Companion.BROADCAST_ACTION_VOLUME
 import me.sithiramunasinghe.flutter.flutter_radio_player.R
 import me.sithiramunasinghe.flutter.flutter_radio_player.core.enums.PlaybackStatus
-import java.util.concurrent.TimeUnit
+import java.lang.Exception
 import java.util.logging.Logger
 
 
@@ -68,7 +66,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
 
     companion object {
 
-        const val manifestNotificationPlaceHolder = "flutter.radio.player.notification.placeholder"
+        const val MANIFEST_NOTIFICATION_ICON = "flutter.radio.player.notification.placeholder"
 
         private const val mediaSessionId = "streaming_audio_player_media_session"
         private const val playbackChannelId = "streaming_audio_player_channel_id"
@@ -270,19 +268,16 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
         mediaSessionConnector?.setPlayer(player)
 
 //        val dispatcher = CustomControlDispatcher(0, 0)
-//
 //        playerNotificationManager?.setControlDispatcher(dispatcher)
+
         playerNotificationManager?.setUseStopAction(true)
-        //        playerNotificationManager.setFastForwardIncrementMs(0)
-        //        playerNotificationManager.setRewindIncrementMs(0)
         playerNotificationManager?.setUsePlayPauseActions(true)
-        //        playerNotificationManager.setUseNavigationActions(false)
-        //        playerNotificationManager.setDefaults(Notification.DEFAULT_ALL)
-        //        playerNotificationManager.setUseNavigationActionsInCompactView(false)
         playerNotificationManager?.setPlayer(player)
         playerNotificationManager?.setMediaSessionToken(mediaSession.sessionToken)
+        val resId = loadLocalDrawable(MANIFEST_NOTIFICATION_ICON)
+        if (resId != null)
+            playerNotificationManager?.setSmallIcon(resId)
 
-        //        playerNotificationManager.
         playbackStatus = PlaybackStatus.PLAYING
     }
 
@@ -362,7 +357,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
                             loadCoverImageFromUrl(coverImageUrl, callback)
                         }
 
-                        return null
+                        return loadLocalBitmap(MANIFEST_NOTIFICATION_ICON)
                     }
 
                 },
@@ -389,13 +384,11 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
                 .into(object : CustomTarget<Bitmap>() {
                     override fun onLoadFailed(errorDrawable: Drawable?) {
                         try {
-                            val appInfos = packageManager.getApplicationInfo(packageName, PackageManager.GET_META_DATA)
-                            val manifestPlaceHolderResource = appInfos.metaData.get(manifestNotificationPlaceHolder) as? Int
-                            if (manifestPlaceHolderResource == null) {
-                                throw Exception("failed to download $coverImageUrl")
-                            } else {
-                                val placeHolder = BitmapFactory.decodeResource(resources, manifestPlaceHolderResource)
+                            val placeHolder = loadLocalBitmap(MANIFEST_NOTIFICATION_ICON)
+                            if (placeHolder != null) {
                                 callback.onBitmap(placeHolder)
+                            } else {
+                                throw Exception("Failed to load placeholder !")
                             }
                         } catch (t: Throwable) {
                             t.printStackTrace()
@@ -411,6 +404,20 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
 
                     }
                 })
+    }
+
+    private fun loadLocalDrawable(path: String): Int? {
+        val appInfos = packageManager.getApplicationInfo(packageName, PackageManager.GET_META_DATA)
+        return appInfos.metaData.get(path) as? Int
+    }
+
+    private fun loadLocalBitmap(path: String): Bitmap? {
+        val manifestPlaceHolderResource = loadLocalDrawable(path)
+        return if (manifestPlaceHolderResource == null) {
+            null
+        } else {
+            BitmapFactory.decodeResource(resources, manifestPlaceHolderResource)
+        }
     }
 
     private fun setupAudioFocus() {
