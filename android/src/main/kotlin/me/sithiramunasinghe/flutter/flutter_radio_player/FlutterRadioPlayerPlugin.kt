@@ -1,13 +1,7 @@
 package me.sithiramunasinghe.flutter.flutter_radio_player
 
 import android.app.Activity
-import android.app.PendingIntent
-import android.app.PendingIntent.FLAG_UPDATE_CURRENT
 import android.content.*
-import android.content.res.AssetFileDescriptor
-import android.content.res.AssetManager
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.os.IBinder
 import androidx.annotation.NonNull
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
@@ -32,14 +26,27 @@ import kotlin.concurrent.schedule
 
 
 /** FlutterRadioPlayerPlugin */
-public class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
+class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
+    private lateinit var activityJavaClass: Class<Activity>
     private var logger = Logger.getLogger(FlutterRadioPlayerPlugin::javaClass.name)
-    public var activity: Activity? = null
 
     private lateinit var methodChannel: MethodChannel
 
-    private var mEventSink: EventSink? = null
+    private var mEventPlaybackStatusSink: EventSink? = null
     private var mEventMetaDataSink: EventSink? = null
+    private var mEventVolumeSink: EventSink? = null
+
+    var isBound = false
+    lateinit var applicationContext: Context
+    lateinit var coreService: StreamingCore
+    private lateinit var serviceIntent: Intent
+
+    private val intentFilter = IntentFilter().apply {
+        addAction(BROADCAST_ACTION_PLAYBACK_STATUS)
+        addAction(BROADCAST_ACTION_META_DATA)
+        addAction(BROADCAST_ACTION_VOLUME)
+    }
+
 
     companion object {
 
@@ -49,18 +56,18 @@ public class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, Activi
             instance.buildEngine(registrar.activeContext()!!, registrar.messenger()!!)
         }
 
-        const val broadcastActionName = "playback_status"
-        const val broadcastChangedMetaDataName = "changed_meta_data"
+        /**
+         * Broadcasts name
+         * */
+        const val BROADCAST_ACTION_PLAYBACK_STATUS = "playback_status"
+        const val BROADCAST_ACTION_META_DATA = "changed_meta_data"
+        const val BROADCAST_ACTION_VOLUME = "volume_changed"
+
+
         const val methodChannelName = "flutter_radio_player"
-        const val eventChannelName = methodChannelName + "_stream"
-        const val eventChannelMetaDataName = methodChannelName + "_meta_stream"
-
-
-        var isBound = false
-        lateinit var applicationContext: Context
-        lateinit var coreService: StreamingCore
-         var bitmap: Bitmap? = null
-        lateinit var serviceIntent: Intent
+        const val playbackEventChannelName = methodChannelName + "_playback_status_stream"
+        const val metadataEventChannelName = methodChannelName + "_metadata_stream"
+        const val volumeEventChannelName = methodChannelName+ "_volume_stream"
     }
 
 
@@ -73,7 +80,6 @@ public class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, Activi
         when (call.method) {
             PlayerMethods.IS_PLAYING.value -> {
                 val playStatus = isPlaying()
-                logger.info("is playing service invoked with result: $playStatus")
                 result.success(playStatus)
             }
             PlayerMethods.PLAY_PAUSE.value -> {
@@ -81,53 +87,40 @@ public class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, Activi
                 result.success(null)
             }
             PlayerMethods.PLAY.value -> {
-                logger.info("play service invoked")
                 play()
                 result.success(null)
             }
             PlayerMethods.NEW_PLAY.value -> {
-                logger.info("newPlay service invoked")
                 newPlay()
                 result.success(null)
             }
             PlayerMethods.PAUSE.value -> {
-                logger.info("pause service invoked")
                 pause()
                 result.success(null)
             }
             PlayerMethods.STOP.value -> {
-                logger.info("stop service invoked")
                 stop()
                 result.success(null)
             }
             PlayerMethods.SET_TITLE.value -> {
-                logger.info("setTitle service invoked")
                 val title = call.argument<String>("title")!!
                 val subTitle = call.argument<String>("subtitle")!!
-                coreService.setTitle(title,subTitle)
+                updateTitle(title, subTitle)
                 result.success(null)
             }
             PlayerMethods.INIT.value -> {
-                logger.info("start service invoked")
                 init(call)
                 result.success(null)
             }
             PlayerMethods.SET_VOLUME.value -> {
                 val volume = call.argument<Double>("volume")!!
-                logger.info("Changing volume to: $volume")
                 setVolume(volume)
                 result.success(null)
             }
             PlayerMethods.SET_URL.value -> {
-                logger.info("Set url invoked")
                 val url = call.argument<String>("streamUrl")!!
-                val coverByteArray = call.argument<ByteArray>("coverImage")
-                if (coverByteArray != null){
-                    bitmap = BitmapFactory.decodeByteArray(coverByteArray,0 ,coverByteArray.size)
-                    coreService.iconBitmap = bitmap
-                }
-
                 val playWhenReady = call.argument<String>("playWhenReady")!!
+
                 setUrl(url, playWhenReady)
             }
             else -> result.notImplemented()
@@ -137,50 +130,41 @@ public class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, Activi
 
     override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
         methodChannel.setMethodCallHandler(null)
+        launchPlayerIntentWithAction(StreamingCore.ACTION_DESTROY)
         LocalBroadcastManager.getInstance(applicationContext).unregisterReceiver(broadcastReceiver)
-        LocalBroadcastManager.getInstance(applicationContext).unregisterReceiver(broadcastReceiverMetaDetails)
     }
 
 
     private fun buildEngine(context: Context, messenger: BinaryMessenger) {
 
-        logger.info("Building Streaming Audio Core...")
         methodChannel = MethodChannel(messenger, methodChannelName)
         methodChannel.setMethodCallHandler(this)
 
-        logger.info("Setting Application Context")
         applicationContext = context
         serviceIntent = Intent(applicationContext, StreamingCore::class.java)
 
         initEventChannelStatus(messenger)
         initEventChannelMetaData(messenger)
+        initEventChannelVolume(messenger)
 
-
-        logger.info("Setting up broadcast receiver with event sink")
-        LocalBroadcastManager.getInstance(context).registerReceiver(broadcastReceiver, IntentFilter(broadcastActionName))
-        LocalBroadcastManager.getInstance(context).registerReceiver(broadcastReceiverMetaDetails, IntentFilter(broadcastChangedMetaDataName))
-
-        logger.info("Streaming Audio Player Engine Build Complete...")
-
+        LocalBroadcastManager.getInstance(context).registerReceiver(broadcastReceiver, intentFilter)
     }
 
     private fun initEventChannelStatus(messenger: BinaryMessenger) {
-        logger.info("Setting up event channel to receive events")
-        val eventChannel = EventChannel(messenger, eventChannelName)
+        val eventChannel = EventChannel(messenger, playbackEventChannelName)
         eventChannel.setStreamHandler(object : StreamHandler {
             override fun onListen(arguments: Any?, events: EventSink?) {
-                mEventSink = events
+                mEventPlaybackStatusSink = events
             }
 
             override fun onCancel(arguments: Any?) {
-                mEventSink = null
+                mEventPlaybackStatusSink = null
             }
         })
     }
 
     private fun initEventChannelMetaData(messenger: BinaryMessenger) {
-        logger.info("Setting up event channel to receive metadata")
-        val eventChannel = EventChannel(messenger, eventChannelMetaDataName)
+        val eventChannel = EventChannel(messenger, metadataEventChannelName)
         eventChannel.setStreamHandler(object : StreamHandler {
             override fun onListen(arguments: Any?, events: EventSink?) {
                 mEventMetaDataSink = events
@@ -192,17 +176,28 @@ public class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, Activi
         })
     }
 
+    private fun initEventChannelVolume(messenger: BinaryMessenger) {
+        val eventChannel = EventChannel(messenger, volumeEventChannelName)
+        eventChannel.setStreamHandler(object : StreamHandler {
+            override fun onListen(arguments: Any?, events: EventSink?) {
+                mEventVolumeSink = events
+            }
+
+            override fun onCancel(arguments: Any?) {
+                mEventVolumeSink = null
+            }
+        })
+    }
+
 
     private fun buildPlayerDetailsMeta(methodCall: MethodCall): PlayerItem {
-
-        logger.info("Mapping method call to player item object")
-
         val url = methodCall.argument<String>("streamURL")
         val appName = methodCall.argument<String>("appName")
         val subTitle = methodCall.argument<String>("subTitle")
         val playWhenReady = methodCall.argument<String>("playWhenReady")
+        val coverImageUrl = methodCall.argument<String>("coverImageUrl")
 
-        return PlayerItem(appName!!, subTitle!!, url!!, playWhenReady!!)
+        return PlayerItem(appName!!, subTitle!!, url!!, playWhenReady!!, coverImageUrl)
     }
 
     /*===========================
@@ -211,81 +206,92 @@ public class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, Activi
      */
 
     private fun init(methodCall: MethodCall) {
-        logger.info("Attempting to initialize service...")
-
-        val coverByteArray = methodCall.argument<ByteArray>("coverImage")
-        if (coverByteArray != null){
-            bitmap = BitmapFactory.decodeByteArray(coverByteArray,0 ,coverByteArray.size)
-        }
 
         if (!isBound) {
             logger.info("Service not bound, binding now....")
-            serviceIntent = setIntentData(serviceIntent, buildPlayerDetailsMeta(methodCall))
+            serviceIntent = createInitIntentData(serviceIntent, buildPlayerDetailsMeta(methodCall))
             applicationContext.bindService(serviceIntent, serviceConnection, Context.BIND_IMPORTANT)
             applicationContext.startService(serviceIntent)
         } else {
             Timer("SettingUp", false).schedule(500) {
-                coreService.reEmmitSatus()
+                launchPlayerIntentWithAction(StreamingCore.ACTION_RE_EMMIT_EVENTS)
             }
         }
     }
 
 
     private fun isPlaying(): Boolean {
-        logger.info("Attempting to get playing status....")
-        val playingStatus = coreService.isPlaying()
-        logger.info("Payback-status: $playingStatus")
-        return playingStatus
+        return coreService.isPlaying()
     }
 
     private fun playOrPause() {
-        logger.info("Attempting to either play or pause...")
-        if (isPlaying()) pause() else play()
+        launchPlayerIntentWithAction(StreamingCore.ACTION_TOGGLE_PLAYER)
     }
 
 
     private fun play() {
-        logger.info("Attempting to Play music....")
-        coreService.play()
+        launchPlayerIntentWithAction(StreamingCore.ACTION_PLAY)
     }
 
     private fun newPlay() {
-        logger.info("Attempting to newPlay music....")
-        coreService.newPlay()
+        launchPlayerIntentWithAction(StreamingCore.ACTION_NEW_PLAYER)
     }
 
     private fun pause() {
-        logger.info("Attempting to pause music....")
-        coreService.pause()
+        launchPlayerIntentWithAction(StreamingCore.ACTION_PAUSE)
     }
 
     private fun stop() {
-        logger.info("Attempting to stop music and unbind services....")
         isBound = false
         applicationContext.unbindService(serviceConnection)
-        coreService.stop()
+        launchPlayerIntentWithAction(StreamingCore.ACTION_STOP)
     }
 
     private fun setUrl(streamUrl: String, playWhenReady: String) {
         val playStatus: Boolean = playWhenReady == "true"
-        coreService.setUrl(streamUrl, playStatus)
+        val intent = Intent(applicationContext, StreamingCore::class.java).apply {
+            putExtra("streamUrl", streamUrl)
+            putExtra("playWhenReady", playStatus)
+            action = StreamingCore.ACTION_UPDATE_STREAM_URL
+        }
+        applicationContext.startService(intent)
     }
 
     private fun setVolume(volume: Double) {
-        logger.info("Attempting to change volume...")
-        coreService.setVolume(volume)
+        val intent = Intent(applicationContext, StreamingCore::class.java).apply {
+            putExtra("volume", volume)
+            action = StreamingCore.ACTION_UPDATE_VOLUME
+        }
+        applicationContext.startService(intent)
+    }
+
+    private fun updateTitle(title: String, subTitle: String) {
+        val intent = Intent(applicationContext, StreamingCore::class.java).apply {
+            putExtra("appName", title)
+            putExtra("subTitle", subTitle)
+            action = StreamingCore.ACTION_UPDATE_TITLE
+        }
+        applicationContext.startService(intent)
+
     }
 
     /**
      * Build the player meta information for Stream service
      */
-    private fun setIntentData(intent: Intent, playerItem: PlayerItem): Intent {
+    private fun createInitIntentData(intent: Intent, playerItem: PlayerItem): Intent {
         intent.putExtra("streamUrl", playerItem.streamUrl)
         intent.putExtra("appName", playerItem.appName)
         intent.putExtra("subTitle", playerItem.subTitle)
         intent.putExtra("playWhenReady", playerItem.playWhenReady)
+        intent.putExtra("coverImageUrl", playerItem.coverImageUrl)
+        intent.action = StreamingCore.ACTION_INIT_PLAYER
         return intent
     }
+
+    private fun launchPlayerIntentWithAction(action: String) {
+        applicationContext.startService(Intent(applicationContext, StreamingCore::class.java).also { it.action = action })
+    }
+
 
     /**
      * Initializes the connection
@@ -300,44 +306,44 @@ public class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, Activi
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             val localBinder = binder as StreamingCore.LocalBinder
             coreService = localBinder.service
-            coreService.activity = this@FlutterRadioPlayerPlugin.activity
+            coreService.activityJavaClass = activityJavaClass
             isBound = true
 //            coreService.reEmmitSatus()
             logger.info("Service Connection Established...")
             logger.info("Service bounded...")
 
-            coreService.iconBitmap = bitmap
-
         }
     }
 
     /**
-     * Broadcast receiver for the playback callbacks
+     * Broadcast receiver
      */
     private var broadcastReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
 
             if (intent != null) {
-                val returnStatus = intent.getStringExtra("status")
-                logger.info("Received status: $returnStatus")
-                mEventSink?.success(returnStatus)
+                when (intent.action ?: "") {
+                    BROADCAST_ACTION_PLAYBACK_STATUS -> {
+                        val returnStatus = intent.getStringExtra("status")
+                        logger.info("Received status: $returnStatus")
+                        mEventPlaybackStatusSink?.success(returnStatus)
+                    }
+                    BROADCAST_ACTION_META_DATA -> {
+                        val receivedMeta = intent.getStringExtra("meta_data")
+                        logger.info("Received meta: $receivedMeta")
+                        mEventMetaDataSink?.success(receivedMeta)
+                    }
+                    BROADCAST_ACTION_VOLUME -> {
+                        val receivedVolume = intent.getFloatExtra("volume", .5F)
+                        logger.info("Received volume: $receivedVolume")
+                        mEventVolumeSink?.success(receivedVolume)
+                    }
+                }
 
             }
         }
     }
 
-    /**
-     * Broadcast receiver for changed track and metadata
-     */
-    private var broadcastReceiverMetaDetails = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent != null) {
-                val receivedMeta = intent.getStringExtra("meta_data")
-                logger.info("Received meta: $receivedMeta")
-                mEventMetaDataSink?.success(receivedMeta)
-            }
-        }
-    }
 
     override fun onDetachedFromActivity() {
     }
@@ -346,7 +352,7 @@ public class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, Activi
     }
 
     override fun onAttachedToActivity(p0: ActivityPluginBinding) {
-        this.activity = p0.activity
+        this.activityJavaClass = p0.activity.javaClass
     }
 
     override fun onDetachedFromActivityForConfigChanges() {

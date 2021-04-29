@@ -4,6 +4,7 @@ import com.google.android.exoplayer2.C
 import com.google.android.exoplayer2.LoadControl
 import com.google.android.exoplayer2.Renderer
 import com.google.android.exoplayer2.source.TrackGroupArray
+import com.google.android.exoplayer2.trackselection.ExoTrackSelection
 import com.google.android.exoplayer2.trackselection.TrackSelectionArray
 import com.google.android.exoplayer2.upstream.Allocator
 import com.google.android.exoplayer2.upstream.DefaultAllocator
@@ -228,11 +229,15 @@ class CustomLoadControl protected constructor(
         reset(false)
     }
 
-    override fun onTracksSelected(renderers: Array<Renderer>, trackGroups: TrackGroupArray,
-                                  trackSelections: TrackSelectionArray) {
-        targetBufferBytes = if (targetBufferBytesOverwrite == C.LENGTH_UNSET) calculateTargetBufferBytes(renderers, trackSelections) else targetBufferBytesOverwrite
-        allocator.setTargetBufferSize(targetBufferBytes)
+    override fun onTracksSelected(renderers: Array<out Renderer>, trackGroups: TrackGroupArray, trackSelections: Array<out ExoTrackSelection>) {
+
     }
+
+//    override fun onTracksSelected(renderers: Array<Renderer>, trackGroups: TrackGroupArray,
+//                                  trackSelections: TrackSelectionArray) {
+//        targetBufferBytes = if (targetBufferBytesOverwrite == C.LENGTH_UNSET) calculateTargetBufferBytes(renderers, trackSelections) else targetBufferBytesOverwrite
+//        allocator.setTargetBufferSize(targetBufferBytes)
+//    }
 
     override fun onStopped() {
         reset(true)
@@ -286,9 +291,10 @@ class CustomLoadControl protected constructor(
         return isBuffering
     }
 
+
     override fun shouldStartPlayback(
-            bufferedDurationUs: Long, playbackSpeed: Float, rebuffering: Boolean): Boolean {
-        var bufferedDurationUs = bufferedDurationUs
+            bufferedDuration: Long, playbackSpeed: Float, rebuffering: Boolean, targetLiveOffsetUs: Long): Boolean {
+        var bufferedDurationUs = bufferedDuration
         bufferedDurationUs = Util.getPlayoutDurationForMediaDuration(bufferedDurationUs, playbackSpeed)
         val minBufferDurationUs = if (rebuffering) bufferForPlaybackAfterRebufferUs else bufferForPlaybackUs
         val shouldStart = minBufferDurationUs <= 0 || bufferedDurationUs >= minBufferDurationUs || (!prioritizeTimeOverSizeThresholds

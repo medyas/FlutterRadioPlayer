@@ -3,14 +3,17 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 
 class FlutterRadioPlayer {
-  static const MethodChannel _channel =
-  const MethodChannel('flutter_radio_player');
+  static const _channelName = 'flutter_radio_player';
+  static const MethodChannel _channel = const MethodChannel(_channelName);
 
   static const EventChannel _eventChannel =
-  const EventChannel("flutter_radio_player_stream");
+      const EventChannel("${_channelName}_playback_status_stream");
 
   static const EventChannel _eventChannelMetaData =
-  const EventChannel("flutter_radio_player_meta_stream");
+      const EventChannel("${_channelName}_metadata_stream");
+
+  static const EventChannel _eventChannelVolume =
+      const EventChannel("${_channelName}_volume_stream");
 
   // constants to support event channel
   static const flutter_radio_stopped = "flutter_radio_stopped";
@@ -21,15 +24,17 @@ class FlutterRadioPlayer {
 
   static Stream<String> _isPlayingStream;
   static Stream<String> _metaDataStream;
+  static Stream<double> _volumeStream;
 
-  Future<void> init(String appName, String subTitle, String streamURL,
-      String playWhenReady,{ByteData coverImage}) async {
+  Future<void> init(
+      String appName, String subTitle, String streamURL, String playWhenReady,
+      {String coverImageUrl}) async {
     return await _channel.invokeMethod("initService", {
       "appName": appName,
       "subTitle": subTitle,
       "streamURL": streamURL,
       "playWhenReady": playWhenReady,
-      "coverImage": coverImage.buffer.asUint8List()
+      "coverImageUrl": coverImageUrl
     });
   }
 
@@ -46,7 +51,6 @@ class FlutterRadioPlayer {
   }
 
   Future<bool> playOrPause() async {
-    print("Invoking platform method: playOrPause");
     return await _channel.invokeMethod("playOrPause");
   }
 
@@ -64,17 +68,14 @@ class FlutterRadioPlayer {
   }
 
   Future<void> setTitle(String title, String subtitle) async {
-    await _channel.invokeMethod("setTitle", {
-      "title": title,
-      "subtitle": subtitle
-    });
+    await _channel
+        .invokeMethod("setTitle", {"title": title, "subtitle": subtitle});
   }
 
-  Future<void> setUrl(String streamUrl, String playWhenReady, ByteData coverImage) async {
+  Future<void> setUrl(String streamUrl, String playWhenReady) async {
     await _channel.invokeMethod("setUrl", {
       "playWhenReady": playWhenReady,
       "streamUrl": streamUrl,
-      "coverImage": coverImage.buffer.asUint8List()
     });
   }
 
@@ -89,11 +90,22 @@ class FlutterRadioPlayer {
 
   Stream<String> get metaDataStream {
     if (_metaDataStream == null) {
-      _metaDataStream =
-          _eventChannelMetaData.receiveBroadcastStream().map<String>((value) => value);
+      _metaDataStream = _eventChannelMetaData
+          .receiveBroadcastStream()
+          .map<String>((value) => value);
     }
 
     return _metaDataStream;
+  }
+
+  Stream<double> get volumeStream {
+    if (_volumeStream == null) {
+      _volumeStream = _eventChannelVolume
+          .receiveBroadcastStream()
+          .map<double>((value) => value);
+    }
+
+    return _volumeStream;
   }
 }
 

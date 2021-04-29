@@ -3,53 +3,50 @@ package me.sithiramunasinghe.flutter.flutter_radio_player.core
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.drawable.Drawable
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.audiofx.AudioEffect
 import android.media.session.MediaSession
 import android.net.Uri
-import android.os.Binder
-import android.os.Build
-import android.os.Handler
-import android.os.IBinder
+import android.os.*
 import android.support.v4.media.session.MediaSessionCompat
 import androidx.annotation.Nullable
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import com.bumptech.glide.Glide
+import com.bumptech.glide.request.target.CustomTarget
 import com.google.android.exoplayer2.*
 import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector
+import com.google.android.exoplayer2.metadata.icy.IcyHeaders
+import com.google.android.exoplayer2.metadata.icy.IcyInfo
 import com.google.android.exoplayer2.source.MediaSource
 import com.google.android.exoplayer2.source.ProgressiveMediaSource
 import com.google.android.exoplayer2.source.hls.HlsMediaSource
 import com.google.android.exoplayer2.ui.PlayerNotificationManager
-import com.google.android.exoplayer2.upstream.DefaultAllocator
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory
 import com.google.android.exoplayer2.util.Util
-import me.sithiramunasinghe.flutter.flutter_radio_player.FlutterRadioPlayerPlugin.Companion.broadcastActionName
-import me.sithiramunasinghe.flutter.flutter_radio_player.FlutterRadioPlayerPlugin.Companion.broadcastChangedMetaDataName
+import me.sithiramunasinghe.flutter.flutter_radio_player.FlutterRadioPlayerPlugin.Companion.BROADCAST_ACTION_META_DATA
+import me.sithiramunasinghe.flutter.flutter_radio_player.FlutterRadioPlayerPlugin.Companion.BROADCAST_ACTION_PLAYBACK_STATUS
+import me.sithiramunasinghe.flutter.flutter_radio_player.FlutterRadioPlayerPlugin.Companion.BROADCAST_ACTION_VOLUME
 import me.sithiramunasinghe.flutter.flutter_radio_player.R
 import me.sithiramunasinghe.flutter.flutter_radio_player.core.enums.PlaybackStatus
 import java.util.concurrent.TimeUnit
 import java.util.logging.Logger
 
+
 class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
 
     private var logger = Logger.getLogger(StreamingCore::javaClass.name)
-    var activity: Activity? = null
-    var iconBitmap: Bitmap? = null
-
+    var activityJavaClass: Class<Activity>? = null
 
     private var isBound = false
     private val iBinder = LocalBinder()
     private lateinit var playbackStatus: PlaybackStatus
     private lateinit var dataSourceFactory: DefaultDataSourceFactory
-    private lateinit var localBroadcastManager: LocalBroadcastManager
-
-    // context
-    private val context = this
-    private val broadcastIntent = Intent(broadcastActionName)
-    private val broadcastMetaDataIntent = Intent(broadcastChangedMetaDataName)
-
+    private val localBroadcastManager = LocalBroadcastManager.getInstance(this@StreamingCore)
 
     // class instances
     private val handler = Handler();
@@ -64,36 +61,87 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
     var notificationTitle = ""
     var notificationSubTitle = ""
 
-    val afChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
-        when (focusChange) {
-            AudioManager.AUDIOFOCUS_LOSS -> {
-                logger.info("AUDIOFOCUS_LOSS")
-
-                pause()
-                handler.postDelayed(delayedStopRunnable, TimeUnit.SECONDS.toMillis(30))
-            }
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                logger.info("AUDIOFOCUS_LOSS_TRANSIENT")
-                pause()
-            }
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                setVolume(0.1)
-            }
-            AudioManager.AUDIOFOCUS_GAIN -> {
-                setVolume(1.0)
-                newPlay()
-            }
-        }
-    }
+    var wasPlaying: Boolean = false
 
     // session keys
     private val playbackNotificationId = 1025
-    private val mediaSessionId = "streaming_audio_player_media_session"
-    private val playbackChannelId = "streaming_audio_player_channel_id"
+
+    companion object {
+
+        const val manifestNotificationPlaceHolder = "flutter.radio.player.notification.placeholder"
+
+        private const val mediaSessionId = "streaming_audio_player_media_session"
+        private const val playbackChannelId = "streaming_audio_player_channel_id"
+
+        const val ACTION_INIT_PLAYER = "action_init_player"
+        const val ACTION_UPDATE_VOLUME = "action_update_volume"
+        const val ACTION_TOGGLE_PLAYER = "action_toggle_player"
+        const val ACTION_PLAY = "action_play"
+        const val ACTION_PAUSE = "action_pause"
+        const val ACTION_STOP = "action_stop"
+        const val ACTION_DESTROY = "action_destroy"
+        const val ACTION_IS_PLAYING = "action_is_playing"
+        const val ACTION_UPDATE_TITLE = "action_update_title"
+        const val ACTION_UPDATE_STREAM_URL = "action_update_stream_url"
+        const val ACTION_NEW_PLAYER = "action_new_player"
+        const val ACTION_RE_EMMIT_EVENTS = "action_re_emmit_events"
+
+    }
 
     inner class LocalBinder : Binder() {
         internal val service: StreamingCore
             get() = this@StreamingCore
+    }
+
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+
+        if (intent != null) {
+            when (intent.action) {
+                ACTION_INIT_PLAYER -> {
+                    if (player != null && isPlaying()) {
+                        reEmmitEvents()
+                        Handler(Looper.getMainLooper()).postDelayed({ reEmmitEvents() }, 1500)
+                        return START_STICKY
+                    }
+
+                    notificationTitle = intent.getStringExtra("appName") ?: ""
+                    notificationSubTitle = intent.getStringExtra("subTitle") ?: ""
+                    val streamUrl = intent.getStringExtra("streamUrl") ?: ""
+                    val playWhenReady = intent.getStringExtra("playWhenReady") == "true"
+                    val coverImageUrl = intent.getStringExtra("coverImageUrl")
+
+                    initStreamPlayer(streamUrl, playWhenReady, coverImageUrl)
+                }
+                ACTION_UPDATE_VOLUME -> {
+                    val volume = intent.getDoubleExtra("volume", .5)
+                    setVolume(volume)
+                }
+                ACTION_TOGGLE_PLAYER -> if (isPlaying()) pause() else play()
+                ACTION_PLAY -> play()
+                ACTION_PAUSE -> pause()
+                ACTION_STOP -> stop()
+                ACTION_DESTROY -> {
+                    if (player == null || !isPlaying()) {
+                        onDestroy()
+                    }
+                }
+                ACTION_NEW_PLAYER -> newPlay()
+                ACTION_IS_PLAYING -> {
+                    reEmmitPlaybackStatus()
+                }
+                ACTION_RE_EMMIT_EVENTS -> reEmmitEvents()
+                ACTION_UPDATE_TITLE -> setTitle(intent.getStringExtra("appName")
+                        ?: "", intent.getStringExtra("subTitle") ?: "")
+                ACTION_UPDATE_STREAM_URL -> setUrl(intent.getStringExtra("streamUrl")
+                        ?: "", intent.getStringExtra("playWhenReady") == "true")
+                else -> {
+
+                }
+            }
+        }
+
+        return START_STICKY
     }
 
     /*===========================
@@ -101,24 +149,21 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
      *===========================
      */
 
-    fun play() {
-        logger.info("playing audio $player ...")
+    private fun play() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             audioManager!!.requestAudioFocus(focusRequest!!)
         } else {
-            audioManager!!.requestAudioFocus(afChangeListener, AudioEffect.CONTENT_TYPE_MUSIC, 0);
+            audioManager!!.requestAudioFocus(this, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
         }
         player?.playWhenReady = true
         wasPlaying = false
-
     }
 
-    fun newPlay() {
-        logger.info("new Play audio $player ...")
+    private fun newPlay() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             audioManager!!.requestAudioFocus(focusRequest!!)
         } else {
-            audioManager!!.requestAudioFocus(afChangeListener, AudioEffect.CONTENT_TYPE_MUSIC, 0);
+            audioManager!!.requestAudioFocus(this, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
         }
         player?.stop()
         player?.prepare()
@@ -127,14 +172,333 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
 
     }
 
-    fun pause() {
-        logger.info("pausing audio...")
+    private fun pause() {
         player?.playWhenReady = false
     }
 
+    fun isPlaying(): Boolean {
+        return playbackStatus == PlaybackStatus.PLAYING
+    }
 
-    fun reEmmitSatus() {
-        logger.info("reEmmtSatus ...")
+    private fun stop() {
+        player?.stop()
+        stopSelf()
+        isBound = false
+    }
+
+    private fun setTitle(title: String, subTitle: String) {
+        this.notificationTitle = title
+        this.notificationSubTitle = subTitle
+        playerNotificationManager?.invalidate()
+    }
+
+    private fun setVolume(volume: Double) {
+        player?.volume = volume.toFloat()
+        reEmmitVolume()
+    }
+
+    private fun setUrl(streamUrl: String, playWhenReady: Boolean) {
+        player?.setMediaSource(buildMediaSource(dataSourceFactory, streamUrl))
+        player?.prepare()
+        player?.playWhenReady = playWhenReady
+    }
+
+    private var delayedStopRunnable = Runnable {
+//        stop()
+    }
+
+
+    private fun initStreamPlayer(streamUrl: String, playWhenReady: Boolean, coverImageUrl: String?) {
+        player = SimpleExoPlayer
+                .Builder(this@StreamingCore)
+//                .setLoadControl(CustomLoadControl
+//                        .Builder()
+//                        .setPrioritizeTimeOverSizeThresholds(true)
+//                        .setBufferDurationsMs(10000,
+//                                10000,
+//                                10000,
+//                                10000)
+//                        .build()
+//                )
+                .build()
+
+
+
+        setupAudioFocus()
+
+        dataSourceFactory = DefaultDataSourceFactory(this@StreamingCore, Util.getUserAgent(this@StreamingCore, notificationTitle))
+
+        val audioSource = buildMediaSource(dataSourceFactory, streamUrl)
+
+        // set exo player configs
+        player?.let {
+            it.addListener(createPlayerEventListener())
+            it.playWhenReady = playWhenReady
+            it.setMediaSource(audioSource)
+            it.prepare()
+        }
+
+        // register our meta data listener
+        player?.addMetadataOutput { metadata ->
+            val length = metadata.length()
+            if (length > 0) {
+                val entry = metadata[0]
+                if (entry is IcyInfo) {
+                    val icyInfo = entry as IcyInfo
+                    val info = icyInfo.title
+                            ?.split(" - ")
+                            ?.map { it.trim().replace("-", " ") }
+                            ?.filter { it.isNotEmpty() }
+                    info?.let {
+                        notificationTitle = info[0]
+                        notificationSubTitle = info.subList(1, info.size).joinToString(separator = " - ")
+
+                        playerNotificationManager?.invalidate()
+                        reEmmitMetaData()
+                    }
+                }
+            }
+
+        }
+
+        createPlayerNotificationManager(coverImageUrl)
+
+        val mediaSession = MediaSessionCompat(this@StreamingCore, mediaSessionId)
+        mediaSession.isActive = true
+
+        mediaSessionConnector = MediaSessionConnector(mediaSession)
+        mediaSessionConnector?.setPlayer(player)
+
+//        val dispatcher = CustomControlDispatcher(0, 0)
+//
+//        playerNotificationManager?.setControlDispatcher(dispatcher)
+        playerNotificationManager?.setUseStopAction(true)
+        //        playerNotificationManager.setFastForwardIncrementMs(0)
+        //        playerNotificationManager.setRewindIncrementMs(0)
+        playerNotificationManager?.setUsePlayPauseActions(true)
+        //        playerNotificationManager.setUseNavigationActions(false)
+        //        playerNotificationManager.setDefaults(Notification.DEFAULT_ALL)
+        //        playerNotificationManager.setUseNavigationActionsInCompactView(false)
+        playerNotificationManager?.setPlayer(player)
+        playerNotificationManager?.setMediaSessionToken(mediaSession.sessionToken)
+
+        //        playerNotificationManager.
+        playbackStatus = PlaybackStatus.PLAYING
+    }
+
+    private fun createPlayerEventListener(): Player.EventListener {
+        return object : Player.EventListener {
+
+            override fun onPlayerStateChanged(playWhenReady: Boolean, playbackState: Int) {
+                playbackStatus = when (playbackState) {
+                    Player.STATE_ENDED -> {
+                        pushEvent(FLUTTER_RADIO_PLAYER_STOPPED)
+                        PlaybackStatus.STOPPED
+                    }
+                    Player.STATE_BUFFERING -> {
+                        pushEvent(FLUTTER_RADIO_PLAYER_LOADING)
+                        PlaybackStatus.LOADING
+                    }
+                    Player.STATE_IDLE -> {
+                        pushEvent(FLUTTER_RADIO_PLAYER_STOPPED)
+                        PlaybackStatus.STOPPED
+                    }
+                    Player.STATE_READY -> {
+                        setPlayWhenReady(playWhenReady)
+                    }
+                    else -> if (this@StreamingCore::playbackStatus.isInitialized) this@StreamingCore.playbackStatus else PlaybackStatus.STOPPED
+
+                }
+                if (playbackStatus == PlaybackStatus.PLAYING) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        this@StreamingCore.audioManager!!.requestAudioFocus(this@StreamingCore.focusRequest!!)
+                    } else {
+                        this@StreamingCore.audioManager!!.requestAudioFocus(this@StreamingCore, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+                    }
+                } else {
+                    logger.info("Remove player as a foreground notification...")
+                    stopForeground(false)
+                }
+                logger.info("onPlayerStateChanged: $playbackStatus")
+
+            }
+
+            override fun onPlayerError(error: ExoPlaybackException) {
+                pushEvent(FLUTTER_RADIO_PLAYER_ERROR)
+                playbackStatus = PlaybackStatus.ERROR
+                error.printStackTrace()
+            }
+        }
+    }
+
+    private fun createPlayerNotificationManager(coverImageUrl: String?) {
+        playerNotificationManager = PlayerNotificationManager.createWithNotificationChannel(
+                this@StreamingCore,
+                playbackChannelId,
+                R.string.channel_name,
+                R.string.channel_description,
+                playbackNotificationId,
+                object : PlayerNotificationManager.MediaDescriptionAdapter {
+
+                    override fun getCurrentContentTitle(player: Player): String {
+                        return notificationTitle
+                    }
+
+                    @Nullable
+                    override fun createCurrentContentIntent(player: Player): PendingIntent {
+                        val i = Intent(this@StreamingCore, activityJavaClass!!)
+                        val contentPendingIntent = PendingIntent.getActivity(this@StreamingCore, 0, i, 0);
+                        return contentPendingIntent
+                    }
+
+                    @Nullable
+                    override fun getCurrentContentText(player: Player): String? {
+                        return notificationSubTitle
+                    }
+
+                    @Nullable
+                    override fun getCurrentLargeIcon(player: Player, callback: PlayerNotificationManager.BitmapCallback): Bitmap? {
+                        if (coverImageUrl != null) {
+                            loadCoverImageFromUrl(coverImageUrl, callback)
+                        }
+
+                        return null
+                    }
+
+                },
+                object : PlayerNotificationManager.NotificationListener {
+                    override fun onNotificationCancelled(notificationId: Int, dismissedByUser: Boolean) {
+                        stop()
+                    }
+
+                    override fun onNotificationPosted(notificationId: Int, notification: Notification, ongoing: Boolean) {
+                        startForeground(notificationId, notification)
+//                        if (!ongoing) {
+//                            stopForeground(false)
+//                        }
+                    }
+                }
+        )
+    }
+
+    private fun loadCoverImageFromUrl(coverImageUrl: String, callback: PlayerNotificationManager.BitmapCallback) {
+        Glide.with(this@StreamingCore)
+                .asBitmap()
+                .timeout(5000)
+                .load(coverImageUrl)
+                .into(object : CustomTarget<Bitmap>() {
+                    override fun onLoadFailed(errorDrawable: Drawable?) {
+                        try {
+                            val appInfos = packageManager.getApplicationInfo(packageName, PackageManager.GET_META_DATA)
+                            val manifestPlaceHolderResource = appInfos.metaData.get(manifestNotificationPlaceHolder) as? Int
+                            if (manifestPlaceHolderResource == null) {
+                                throw Exception("failed to download $coverImageUrl")
+                            } else {
+                                val placeHolder = BitmapFactory.decodeResource(resources, manifestPlaceHolderResource)
+                                callback.onBitmap(placeHolder)
+                            }
+                        } catch (t: Throwable) {
+                            t.printStackTrace()
+                            logger.info("Bitmap Error: ${t.message}")
+                        }
+                    }
+
+                    override fun onResourceReady(resource: Bitmap, transition: com.bumptech.glide.request.transition.Transition<in Bitmap>?) {
+                        callback.onBitmap(resource)
+                    }
+
+                    override fun onLoadCleared(placeholder: Drawable?) {
+
+                    }
+                })
+    }
+
+    private fun setupAudioFocus() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).run {
+                setAudioAttributes(android.media.AudioAttributes.Builder().run {
+                    setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                    setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                    build()
+                })
+                setAcceptsDelayedFocusGain(true)
+                setOnAudioFocusChangeListener(this@StreamingCore, handler)
+                build()
+            }
+        }
+
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            focusRequest?.let { audioManager!!.requestAudioFocus(it) }
+        } else {
+            audioManager!!.requestAudioFocus(this, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+        }
+    }
+
+    override fun onBind(intent: Intent?): IBinder {
+        return iBinder
+    }
+
+    override fun onDestroy() {
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            mediaSession?.release()
+        }
+
+        mediaSessionConnector?.setPlayer(null)
+        playerNotificationManager?.setPlayer(null)
+        player?.release()
+        stopForeground(true)
+
+        super.onDestroy()
+    }
+
+    override fun onAudioFocusChange(audioFocus: Int) {
+        when (audioFocus) {
+
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                player?.volume = 0.5f
+                if (wasPlaying) {
+                    newPlay()
+                }
+            }
+
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                if (isPlaying()) {
+                    pause()
+                }
+            }
+
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                if (isPlaying()) {
+                    pause()
+                    wasPlaying = true
+                }
+            }
+
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                if (isPlaying()) {
+                    player?.volume = 0.1f
+                }
+            }
+        }
+    }
+
+    /**
+     * ReEmmit status
+     * */
+    private fun reEmmitEvents() {
+        logger.info("reEmmtSatus ===========================>")
+        reEmmitPlaybackStatus()
+        reEmmitVolume()
+        reEmmitMetaData()
+    }
+
+    /**
+     * Push events to local broadcaster service.
+     */
+    private fun reEmmitPlaybackStatus() {
         if (this::playbackStatus.isInitialized) {
             playbackStatus = when (playbackStatus) {
                 PlaybackStatus.PAUSED -> {
@@ -162,288 +526,17 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
         }
     }
 
-    fun isPlaying(): Boolean {
-        val isPlaying = this.playbackStatus == PlaybackStatus.PLAYING
-        logger?.info("is playing status: $isPlaying")
-        return isPlaying
+    private fun reEmmitMetaData() {
+        localBroadcastManager.sendBroadcast(Intent(BROADCAST_ACTION_META_DATA).putExtra("meta_data", "$notificationTitle:$notificationSubTitle"))
     }
 
-    var wasPlaying: Boolean = false
-
-    fun stop() {
-        logger.info("stopping audio $player ...")
-        player?.stop()
-        stopSelf()
-        isBound = false
+    private fun reEmmitVolume() {
+        localBroadcastManager.sendBroadcast(Intent(BROADCAST_ACTION_VOLUME).putExtra("volume", player?.volume))
     }
 
-    fun setTitle(title: String, subTitle: String) {
-        logger.info("settingTitle $title,  $player ...")
-        this.notificationTitle = title
-        this.notificationSubTitle = subTitle
-        logger.info("calling  playerNotificationManager.invalidate()...")
-        playerNotificationManager?.invalidate()
-    }
-
-    fun setVolume(volume: Double) {
-        logger.info("Changing volume to : $volume")
-        player?.volume = volume.toFloat()
-    }
-
-    fun setUrl(streamUrl: String, playWhenReady: Boolean) {
-        logger.info("ReadyPlay status: $playWhenReady")
-        logger.info("Set stream URL: $streamUrl")
-        player?.setMediaSource(buildMediaSource(dataSourceFactory, streamUrl))
-        player?.prepare()
-        player?.playWhenReady = playWhenReady
-    }
-
-    private var delayedStopRunnable = Runnable {
-//        stop()
-    }
-
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-
-        logger.info("Firing up service. (onStartCommand)...")
-
-        localBroadcastManager = LocalBroadcastManager.getInstance(context)
-
-        logger.info("LocalBroadCastManager Received...")
-
-        // get details
-        notificationTitle = intent!!.getStringExtra("appName")
-        notificationSubTitle = intent.getStringExtra("subTitle")
-        val streamUrl = intent.getStringExtra("streamUrl")
-        val playWhenReady = intent.getStringExtra("playWhenReady") == "true"
-        player = SimpleExoPlayer
-                .Builder(context)
-                .setLoadControl(CustomLoadControl
-                        .Builder()
-                        .setPrioritizeTimeOverSizeThresholds(true)
-                        .setBufferDurationsMs(10000,
-                                10000,
-                                10000,
-                                10000)
-                        .build()
-                ).build()
-
-
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).run {
-                setAudioAttributes(android.media.AudioAttributes.Builder().run {
-                    setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                    setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
-                    build()
-                })
-                setAcceptsDelayedFocusGain(true)
-                setOnAudioFocusChangeListener(this@StreamingCore, handler)
-                build()
-            }
-        }
-
-        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            audioManager!!.requestAudioFocus(focusRequest)
-        } else {
-            audioManager!!.requestAudioFocus(afChangeListener, AudioEffect.CONTENT_TYPE_MUSIC, 0);
-        }
-
-        dataSourceFactory = DefaultDataSourceFactory(context, Util.getUserAgent(context, notificationTitle))
-
-        val audioSource = buildMediaSource(dataSourceFactory, streamUrl)
-
-        val playerEvents = object : Player.EventListener {
-
-            override fun onPlayerStateChanged(playWhenReady: Boolean, playbackState: Int) {
-                playbackStatus = when (playbackState) {
-                    Player.STATE_ENDED -> {
-                        pushEvent(FLUTTER_RADIO_PLAYER_STOPPED)
-                        PlaybackStatus.STOPPED
-                    }
-                    Player.STATE_BUFFERING -> {
-                        pushEvent(FLUTTER_RADIO_PLAYER_LOADING)
-                        PlaybackStatus.LOADING
-                    }
-                    Player.STATE_IDLE -> {
-                        pushEvent(FLUTTER_RADIO_PLAYER_STOPPED)
-                        PlaybackStatus.STOPPED
-                    }
-                    Player.STATE_READY -> {
-                        setPlayWhenReady(playWhenReady)
-                    }
-                    else -> if (this@StreamingCore::playbackStatus.isInitialized) this@StreamingCore.playbackStatus else PlaybackStatus.STOPPED
-
-                }
-                if (playbackStatus == PlaybackStatus.PLAYING) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        this@StreamingCore.audioManager!!.requestAudioFocus(this@StreamingCore.focusRequest!!)
-                    } else {
-                        this@StreamingCore.audioManager!!.requestAudioFocus(this@StreamingCore.afChangeListener, AudioEffect.CONTENT_TYPE_MUSIC, 0);
-                    }
-                } else {
-                    logger.info("Remove player as a foreground notification...")
-                    stopForeground(false)
-                }
-                logger.info("onPlayerStateChanged: $playbackStatus")
-
-            }
-
-            override fun onPlayerError(error: ExoPlaybackException) {
-                pushEvent(FLUTTER_RADIO_PLAYER_ERROR)
-                playbackStatus = PlaybackStatus.ERROR
-                error.printStackTrace()
-            }
-        }
-
-        // set exo player configs
-        player?.let {
-            it.addListener(playerEvents)
-            it.playWhenReady = playWhenReady
-            it.setMediaSource(audioSource)
-            it.prepare()
-        }
-
-        // register our meta data listener
-        player?.addMetadataOutput {
-            val metaData = it.get(0).toString()
-            localBroadcastManager.sendBroadcast(broadcastMetaDataIntent.putExtra("meta_data", metaData))
-        }
-
-        val playerNotificationManager = PlayerNotificationManager.createWithNotificationChannel(
-                context,
-                playbackChannelId,
-                R.string.channel_name,
-                R.string.channel_description,
-                playbackNotificationId,
-                object : PlayerNotificationManager.MediaDescriptionAdapter {
-
-                    override fun getCurrentContentTitle(player: Player): String {
-                        logger.info("updating title = $notificationTitle")
-                        return notificationTitle
-                    }
-
-                    @Nullable
-                    override fun createCurrentContentIntent(player: Player): PendingIntent {
-                        val intent = Intent(this@StreamingCore, activity!!.javaClass)
-                        val contentPendingIntent = PendingIntent.getActivity(this@StreamingCore, 0, intent, 0);
-                        return contentPendingIntent;
-                    }
-
-                    @Nullable
-                    override fun getCurrentContentText(player: Player): String? {
-                        return null//notificationSubTitle
-                    }
-
-                    @Nullable
-                    override fun getCurrentLargeIcon(player: Player, callback: PlayerNotificationManager.BitmapCallback): Bitmap? {
-                        return this@StreamingCore.iconBitmap; // OS will use the application icon.
-                    }
-
-                },
-                object : PlayerNotificationManager.NotificationListener {
-                    override fun onNotificationCancelled(notificationId: Int, dismissedByUser: Boolean) {
-                        logger.info("Notification Cancelled. Stopping player...")
-                        stop()
-                    }
-
-                    override fun onNotificationPosted(notificationId: Int, notification: Notification, ongoing: Boolean) {
-                        logger.info("Attaching player as a foreground notification...ongoing:$ongoing")
-                        startForeground(notificationId, notification)
-                        if (!ongoing) {
-                            stopForeground(false)
-                        }
-                    }
-                }
-        )
-        this.playerNotificationManager = playerNotificationManager
-        logger.info("Building Media Session and Player Notification.")
-
-        val mediaSession = MediaSessionCompat(context, mediaSessionId)
-        mediaSession.isActive = true
-
-        mediaSessionConnector = MediaSessionConnector(mediaSession)
-        mediaSessionConnector?.setPlayer(player)
-
-        val dispatcher = CustomControlDispatcher()
-        dispatcher.fastForwardIncrementMs = 0
-        dispatcher.rewindIncrementMs = 0
-
-        playerNotificationManager.setControlDispatcher(dispatcher)
-        playerNotificationManager.setUseStopAction(true)
-        playerNotificationManager.setFastForwardIncrementMs(0)
-        playerNotificationManager.setRewindIncrementMs(0)
-        playerNotificationManager.setUsePlayPauseActions(true)
-        playerNotificationManager.setUseNavigationActions(false)
-        playerNotificationManager.setDefaults(Notification.DEFAULT_ALL)
-        playerNotificationManager.setUseNavigationActionsInCompactView(false)
-        playerNotificationManager.setPlayer(player)
-        playerNotificationManager.setMediaSessionToken(mediaSession.sessionToken)
-
-//        playerNotificationManager.
-        playbackStatus = PlaybackStatus.PLAYING
-
-        return START_STICKY
-    }
-
-    override fun onBind(intent: Intent?): IBinder? {
-        return iBinder
-    }
-
-    override fun onDestroy() {
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            mediaSession?.release()
-        }
-
-        mediaSessionConnector?.setPlayer(null)
-        playerNotificationManager?.setPlayer(null)
-        player?.release()
-
-        super.onDestroy()
-    }
-
-    override fun onAudioFocusChange(audioFocus: Int) {
-        when (audioFocus) {
-
-            AudioManager.AUDIOFOCUS_GAIN -> {
-                player?.volume = 0.8f
-                if (wasPlaying) {
-                    newPlay()
-                }
-            }
-
-            AudioManager.AUDIOFOCUS_LOSS -> {
-                logger.info("AudioManager.AUDIOFOCUS_LOSS")
-                if (isPlaying()) {
-                    pause()
-                }
-            }
-
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                if (isPlaying()) {
-                    logger.info("AudioManager.AUDIOFOCUS_LOSS_TRANSIENT")
-                    pause()
-                    wasPlaying = true
-                }
-            }
-
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                if (isPlaying()) {
-                    player?.volume = 0.1f
-                }
-            }
-        }
-    }
-
-    /**
-     * Push events to local broadcaster service.
-     */
     private fun pushEvent(eventName: String) {
-        logger.info("Pushing Event: $eventName")
-        localBroadcastManager.sendBroadcast(Intent(broadcastActionName).putExtra("status", eventName))
+//        logger.info("Pushing Event: $eventName")
+        localBroadcastManager.sendBroadcast(Intent(BROADCAST_ACTION_PLAYBACK_STATUS).putExtra("status", eventName))
     }
 
     /**

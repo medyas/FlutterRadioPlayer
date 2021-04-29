@@ -1,9 +1,6 @@
 package me.sithiramunasinghe.flutter.flutter_radio_player.core
 
-import com.google.android.exoplayer2.C
-import com.google.android.exoplayer2.ControlDispatcher
-import com.google.android.exoplayer2.Player
-import com.google.android.exoplayer2.Timeline
+import com.google.android.exoplayer2.*
 
 /*
 * Copyright (C) 2017 The Android Open Source Project
@@ -28,12 +25,16 @@ class CustomControlDispatcher @JvmOverloads constructor(
         /** Returns the rewind increment in milliseconds.  */
         @set:Deprecated("""Create a new instance instead and pass the new instance to the UI component. This
         makes sure the UI gets updated and is in sync with the new values.""") var rewindIncrementMs: Long = CustomControlDispatcher.Companion.DEFAULT_REWIND_MS.toLong()) : ControlDispatcher {
-    private val window: Timeline.Window
+    private val window: Timeline.Window = Timeline.Window()
+    override fun dispatchPrepare(player: Player): Boolean {
+        player.prepare()
+        return true
+    }
 
     override fun dispatchSetPlayWhenReady(player: Player, playWhenReady: Boolean): Boolean {
         if (!playWhenReady)
             player.playWhenReady = playWhenReady
-        else{
+        else {
             player.stop()
             player.prepare()
             player.playWhenReady = playWhenReady
@@ -108,6 +109,11 @@ class CustomControlDispatcher @JvmOverloads constructor(
         return true
     }
 
+    override fun dispatchSetPlaybackParameters(player: Player, playbackParameters: PlaybackParameters): Boolean {
+        player.setPlaybackParameters(playbackParameters)
+        return true
+    }
+
     override fun isRewindEnabled(): Boolean {
         return rewindIncrementMs > 0
     }
@@ -143,8 +149,4 @@ class CustomControlDispatcher @JvmOverloads constructor(
      * @param rewindIncrementMs The rewind increment in milliseconds. A non-positive value disables
      * the rewind operation.
      */
-    /** Creates an instance.  */
-    init {
-        window = Timeline.Window()
-    }
 }

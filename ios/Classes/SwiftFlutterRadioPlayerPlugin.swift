@@ -29,14 +29,15 @@ public class SwiftFlutterRadioPlayerPlugin: NSObject, FlutterPlugin {
                 let streamURL = args["streamURL"] as? String,
                 let appName = args["appName"] as? String,
                 let subTitle = args["subTitle"] as? String,
-                let playWhenReady = args["playWhenReady"] as? String
+                let playWhenReady = args["playWhenReady"] as? String,
+                let coverImageUrl = args["coverImageUrl"] as? String
             {
                 if !streamingCore.isFirstTime{
                     NotificationCenter.default.removeObserver(self, name:  Notifications.playbackNotification, object: nil)
                 }
                 NotificationCenter.default.addObserver(self, selector: #selector(onRecieve(_:)), name: Notifications.playbackNotification, object: nil)
 
-                streamingCore.initService(streamURL: streamURL, serviceName: appName, secondTitle: subTitle, playWhenReady: playWhenReady)
+                streamingCore.initService(streamURL: streamURL, serviceName: appName, secondTitle: subTitle, playWhenReady: playWhenReady, coverImageUrl: coverImageUrl)
                 
                 result(false)
             }

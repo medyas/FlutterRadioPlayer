@@ -49,7 +49,7 @@ class StreamingCore : NSObject, AVPlayerItemMetadataOutputPushDelegate {
         }
     }
     
-    func initService(streamURL: String, serviceName: String, secondTitle: String, playWhenReady: String) -> Void {
+    func initService(streamURL: String, serviceName: String, secondTitle: String, playWhenReady: String, coverImageUrl: String) -> Void {
         self.streamUrl = streamURL
         print("Initialing Service...")
 
@@ -252,6 +252,7 @@ class StreamingCore : NSObject, AVPlayerItemMetadataOutputPushDelegate {
             commandCenter = MPRemoteCommandCenter.shared()
             
             // build now playing info
+            //TODO ===========================================================
             let nowPlayingInfo = [MPMediaItemPropertyTitle : appName, MPMediaItemPropertyArtist: subTitle]
             
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
@@ -376,16 +377,11 @@ class StreamingCore : NSObject, AVPlayerItemMetadataOutputPushDelegate {
                 }
                 if newStatus == .readyToPlay {
                     print("Observer: Ready to play...")
-                    if (!isPlaying()) {
-                        if (self.playWhenReady) {
-                           _ = play()
-                        }else{
-                            playerStatus = Constants.FLUTTER_RADIO_PAUSED
-                            pushEvent(eventName: Constants.FLUTTER_RADIO_PAUSED)}
-                    } else {
-                        playerStatus = Constants.FLUTTER_RADIO_PLAYING
-
-                        pushEvent(eventName: Constants.FLUTTER_RADIO_PLAYING)
+                    pushEvent(eventName: isPlaying()
+                                ? Constants.FLUTTER_RADIO_PLAYING
+                                : Constants.FLUTTER_RADIO_PAUSED)
+                    if !isPlaying() && self.playWhenReady {
+                        play()
                     }
                 }
                 
@@ -416,6 +412,27 @@ class StreamingCore : NSObject, AVPlayerItemMetadataOutputPushDelegate {
                 print("some...")
             }
 //            print(keyPath)
+        }
+    }
+
+    private func loadCoverImageFromUrl() {
+        DispatchQueue.global().async {
+                if let url = URL(string: imageMetas)  {
+                    if let data = try? Data.init(contentsOf: url), let image = UIImage(data: data) {
+                        let artwork = MPMediaItemArtwork(boundsSize: image.size, requestHandler: { (_ size : CGSize) -> UIImage in
+                            return image
+                        })
+                        DispatchQueue.main.async {
+                            if(self.audioMetas == audioMetas){ //always the sam song ?
+                                print(self.nowPlayingInfo.description)
+                                
+                                self.nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+                                MPNowPlayingInfoCenter.default().nowPlayingInfo = self.nowPlayingInfo
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
     

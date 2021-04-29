@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -33,7 +34,13 @@ class _MyAppState extends State<MyApp> {
   Future<void> initRadioService() async {
     try {
       await _flutterRadioPlayer.init(
-          "Flutter Radio Example", "Live", "http://perseus.shoutca.st:9899/stream?type=http&nocache=1906", "false");
+        "Flutter Radio Example",
+        "Live",
+        "http://5.9.16.111:8210/arabic_live",
+        "false",
+        coverImageUrl:
+            "https://drive.google.com/uc?export=view&id=${Platform.isAndroid ? "1rxEYh9xGG9PEFb5Fda3HKhXhoClG5GF7" : "1q5FweYYfwPDXyMiEBbQjA1rs6crOaGE3"}",
+      );
     } on PlatformException {
       print("Exception occurred while trying to register the services.");
     }
@@ -98,15 +105,27 @@ class _MyAppState extends State<MyApp> {
                         break;
                     }
                   }),
-              Slider(
-                  value: widget.volume,
-                  min: 0,
-                  max: 1.0,
-                  onChanged: (value) => setState(() {
-                        widget.volume = value;
-                        _flutterRadioPlayer.setVolume(widget.volume);
-                      })),
-              Text("Volume: " + (widget.volume * 100).toStringAsFixed(0)),
+              StreamBuilder<double>(
+                stream: _flutterRadioPlayer.volumeStream,
+                builder: (_, snapshot) {
+                  final volume = snapshot.data ?? .5;
+
+                  return Column(
+                    children: [
+                      Slider(
+                        value: volume,
+                        min: 0,
+                        max: 1.0,
+                        onChanged: (value) =>
+                            _flutterRadioPlayer.setVolume(value),
+                      ),
+                      Text(
+                        "Volume: " + (volume * 100).toStringAsFixed(0),
+                      ),
+                    ],
+                  );
+                },
+              ),
               SizedBox(
                 height: 15,
               ),
@@ -115,11 +134,16 @@ class _MyAppState extends State<MyApp> {
                   initialData: "",
                   stream: _flutterRadioPlayer.metaDataStream,
                   builder: (context, snapshot) {
-                    return Text(snapshot.data);
+                    return Text(snapshot.data ?? "**");
                   }),
-              RaisedButton(child: Text("Change URL"), onPressed: () async {
-                _flutterRadioPlayer.setUrl("http://209.133.216.3:7018/;stream.mp3", "false",);
-              })
+              RaisedButton(
+                  child: Text("Change URL"),
+                  onPressed: () async {
+                    _flutterRadioPlayer.setUrl(
+                      "http://5.9.16.111:8210/arabic_live",
+                      "false",
+                    );
+                  })
             ],
           ),
         ),
