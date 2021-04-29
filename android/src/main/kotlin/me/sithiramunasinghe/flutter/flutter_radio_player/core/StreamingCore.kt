@@ -19,7 +19,9 @@ import com.bumptech.glide.Glide
 import com.bumptech.glide.request.target.CustomTarget
 import com.google.android.exoplayer2.*
 import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector
+import com.google.android.exoplayer2.metadata.Metadata
 import com.google.android.exoplayer2.metadata.icy.IcyInfo
+import com.google.android.exoplayer2.source.DefaultMediaSourceFactory
 import com.google.android.exoplayer2.source.MediaSource
 import com.google.android.exoplayer2.source.ProgressiveMediaSource
 import com.google.android.exoplayer2.source.hls.HlsMediaSource
@@ -154,6 +156,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
         } else {
             audioManager!!.requestAudioFocus(this, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
         }
+//        player?.seekToDefaultPosition()
         player?.playWhenReady = true
         wasPlaying = false
     }
@@ -210,6 +213,8 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
     private fun initStreamPlayer(streamUrl: String, playWhenReady: Boolean, coverImageUrl: String?) {
         player = SimpleExoPlayer
                 .Builder(this@StreamingCore)
+                .setMediaSourceFactory(
+                        DefaultMediaSourceFactory(this@StreamingCore).setLiveTargetOffsetMs(1000))
 //                .setLoadControl(CustomLoadControl
 //                        .Builder()
 //                        .setPrioritizeTimeOverSizeThresholds(true)
@@ -221,6 +226,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
 //                )
                 .build()
 
+        player?.volume = 0.5f
 
 
         setupAudioFocus()
@@ -239,25 +245,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
 
         // register our meta data listener
         player?.addMetadataOutput { metadata ->
-            val length = metadata.length()
-            if (length > 0) {
-                val entry = metadata[0]
-                if (entry is IcyInfo) {
-                    val icyInfo = entry as IcyInfo
-                    val info = icyInfo.title
-                            ?.split(" - ")
-                            ?.map { it.trim().replace("-", " ") }
-                            ?.filter { it.isNotEmpty() }
-                    info?.let {
-                        notificationTitle = info[0]
-                        notificationSubTitle = info.subList(1, info.size).joinToString(separator = " - ")
-
-                        playerNotificationManager?.invalidate()
-                        reEmmitMetaData()
-                    }
-                }
-            }
-
+            processIcyMetaData(metadata)
         }
 
         createPlayerNotificationManager(coverImageUrl)
@@ -280,6 +268,29 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
             playerNotificationManager?.setSmallIcon(resId)
 
         playbackStatus = PlaybackStatus.PLAYING
+    }
+
+    private fun processIcyMetaData(metadata: Metadata) {
+        val length = metadata.length()
+        if (length > 0) {
+            val entry = metadata[0]
+            if (entry is IcyInfo) {
+                val icyInfo = entry as IcyInfo
+                val info = icyInfo.title
+                        ?.split(" - ")
+                        ?.map { it.trim().replace("-", " ") }
+                        ?.filter { it.isNotEmpty() }
+                info?.let {
+//                    logger.info("MetadataOutput ---------- ${info.joinToString(separator = " - ")}")
+
+                    notificationTitle = if (info.isNotEmpty()) info[0] else ""
+                    notificationSubTitle = if (info.size > 1) info.subList(1, info.size).joinToString(separator = " - ") else ""
+
+                    playerNotificationManager?.invalidate()
+                    reEmmitMetaData()
+                }
+            }
+        }
     }
 
     private fun createPlayerEventListener(): Player.EventListener {

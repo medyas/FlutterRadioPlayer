@@ -325,17 +325,17 @@ class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware
                 when (intent.action ?: "") {
                     BROADCAST_ACTION_PLAYBACK_STATUS -> {
                         val returnStatus = intent.getStringExtra("status")
-                        logger.info("Received status: $returnStatus")
+//                        logger.info("Received status: $returnStatus")
                         mEventPlaybackStatusSink?.success(returnStatus)
                     }
                     BROADCAST_ACTION_META_DATA -> {
                         val receivedMeta = intent.getStringExtra("meta_data")
-                        logger.info("Received meta: $receivedMeta")
+//                        logger.info("Received meta: $receivedMeta")
                         mEventMetaDataSink?.success(receivedMeta)
                     }
                     BROADCAST_ACTION_VOLUME -> {
                         val receivedVolume = intent.getFloatExtra("volume", .5F)
-                        logger.info("Received volume: $receivedVolume")
+//                        logger.info("Received volume: $receivedVolume")
                         mEventVolumeSink?.success(receivedVolume)
                     }
                 }
