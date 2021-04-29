@@ -38,7 +38,6 @@ class _MyAppState extends State<MyApp> {
         "Live",
         "http://5.9.16.111:8210/arabic_live",
         "false",
-        coverImageUrl:
             "https://drive.google.com/uc?export=view&id=${Platform.isAndroid ? "1rxEYh9xGG9PEFb5Fda3HKhXhoClG5GF7" : "1q5FweYYfwPDXyMiEBbQjA1rs6crOaGE3"}",
       );
     } on PlatformException {
@@ -57,11 +56,11 @@ class _MyAppState extends State<MyApp> {
           child: Column(
             children: <Widget>[
               StreamBuilder(
-                  stream: _flutterRadioPlayer.isPlayingStream,
+                  stream: _flutterRadioPlayer.isPlayingStream!,
                   initialData: widget.playerState,
                   builder:
-                      (BuildContext context, AsyncSnapshot<String> snapshot) {
-                    String returnData = snapshot.data;
+                      (BuildContext context, AsyncSnapshot<String?> snapshot) {
+                    String returnData = snapshot.data ?? "";
                     print("object data: " + returnData);
                     switch (returnData) {
                       case FlutterRadioPlayer.flutter_radio_stopped:
@@ -105,8 +104,8 @@ class _MyAppState extends State<MyApp> {
                         break;
                     }
                   }),
-              StreamBuilder<double>(
-                stream: _flutterRadioPlayer.volumeStream,
+              StreamBuilder<double?>(
+                stream: _flutterRadioPlayer.volumeStream!,
                 builder: (_, snapshot) {
                   final volume = snapshot.data ?? .5;
 
@@ -130,7 +129,7 @@ class _MyAppState extends State<MyApp> {
                 height: 15,
               ),
               Text("Metadata Track "),
-              StreamBuilder<String>(
+              StreamBuilder<String?>(
                   initialData: "",
                   stream: _flutterRadioPlayer.metaDataStream,
                   builder: (context, snapshot) {

@@ -22,13 +22,13 @@ class FlutterRadioPlayer {
   static const flutter_radio_error = "flutter_radio_error";
   static const flutter_radio_loading = "flutter_radio_loading";
 
-  static Stream<String> _isPlayingStream;
-  static Stream<String> _metaDataStream;
-  static Stream<double> _volumeStream;
+  static Stream<String?>? _isPlayingStream;
+  static Stream<String?>? _metaDataStream;
+  static Stream<double?>? _volumeStream;
 
   Future<void> init(
       String appName, String subTitle, String streamURL, String playWhenReady,
-      {String coverImageUrl}) async {
+      String coverImageUrl) async {
     return await _channel.invokeMethod("initService", {
       "appName": appName,
       "subTitle": subTitle,
@@ -38,28 +38,28 @@ class FlutterRadioPlayer {
     });
   }
 
-  Future<bool> play() async {
+  Future<bool?> play() async {
     return await _channel.invokeMethod("play");
   }
 
-  Future<bool> newPlay() async {
+  Future<bool?> newPlay() async {
     return await _channel.invokeMethod("newPlay");
   }
 
-  Future<bool> pause() async {
+  Future<bool?> pause() async {
     return await _channel.invokeMethod("pause");
   }
 
-  Future<bool> playOrPause() async {
+  Future<bool?> playOrPause() async {
     return await _channel.invokeMethod("playOrPause");
   }
 
-  Future<bool> stop() async {
+  Future<bool?> stop() async {
     return await _channel.invokeMethod("stop");
   }
 
-  Future<bool> isPlaying() async {
-    bool isPlaying = await _channel.invokeMethod("isPlaying");
+  Future<bool?> isPlaying() async {
+    bool? isPlaying = await _channel.invokeMethod("isPlaying");
     return isPlaying;
   }
 
@@ -80,29 +80,29 @@ class FlutterRadioPlayer {
   }
 
   /// Get the player stream.
-  Stream<String> get isPlayingStream {
+  Stream<String?>? get isPlayingStream {
     if (_isPlayingStream == null) {
       _isPlayingStream =
-          _eventChannel.receiveBroadcastStream().map<String>((value) => value);
+          _eventChannel.receiveBroadcastStream().map<String?>((value) => value);
     }
     return _isPlayingStream;
   }
 
-  Stream<String> get metaDataStream {
+  Stream<String?>? get metaDataStream {
     if (_metaDataStream == null) {
       _metaDataStream = _eventChannelMetaData
           .receiveBroadcastStream()
-          .map<String>((value) => value);
+          .map<String?>((value) => value);
     }
 
     return _metaDataStream;
   }
 
-  Stream<double> get volumeStream {
+  Stream<double?>? get volumeStream {
     if (_volumeStream == null) {
       _volumeStream = _eventChannelVolume
           .receiveBroadcastStream()
-          .map<double>((value) => value);
+          .map<double?>((value) => value);
     }
 
     return _volumeStream;
