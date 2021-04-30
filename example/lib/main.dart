@@ -61,7 +61,7 @@ class _MyAppState extends State<MyApp> {
                   builder:
                       (BuildContext context, AsyncSnapshot<String?> snapshot) {
                     String returnData = snapshot.data ?? "";
-                    print("object data: " + returnData);
+                    print("playerState data: " + returnData);
                     switch (returnData) {
                       case FlutterRadioPlayer.flutter_radio_stopped:
                         return RaisedButton(
@@ -131,7 +131,6 @@ class _MyAppState extends State<MyApp> {
               ),
               Text("Metadata Track "),
               StreamBuilder<String?>(
-                  initialData: "",
                   stream: _flutterRadioPlayer.metaDataStream,
                   builder: (context, snapshot) {
                     return Text(snapshot.data ?? "**");

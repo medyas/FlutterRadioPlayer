@@ -7,6 +7,7 @@ public class SwiftFlutterRadioPlayerPlugin: NSObject, FlutterPlugin {
     
     public static var mEventSink: FlutterEventSink?
     public static var eventSinkMetadata: FlutterEventSink?
+    public static var eventSinkVolume: FlutterEventSink?
     
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: "flutter_radio_player", binaryMessenger: registrar.messenger())
@@ -14,11 +15,14 @@ public class SwiftFlutterRadioPlayerPlugin: NSObject, FlutterPlugin {
         registrar.addMethodCallDelegate(instance, channel: channel)
         
         // register the event channel
-        let eventChannel = FlutterEventChannel(name: "flutter_radio_player_stream", binaryMessenger: registrar.messenger())
+        let eventChannel = FlutterEventChannel(name: "flutter_radio_player_playback_status_stream", binaryMessenger: registrar.messenger())
         eventChannel.setStreamHandler(StatusStreamHandler())
         
-        let eventChannelMetadata = FlutterEventChannel(name: "flutter_radio_player_meta_stream", binaryMessenger: registrar.messenger())
+        let eventChannelMetadata = FlutterEventChannel(name: "flutter_radio_player_metadata_stream", binaryMessenger: registrar.messenger())
         eventChannelMetadata.setStreamHandler(MetaDataStreamHandler())
+        
+        let eventChannelVolume = FlutterEventChannel(name: "flutter_radio_player_volume_stream", binaryMessenger: registrar.messenger())
+        eventChannelVolume.setStreamHandler(VolumeStreamHandler())
     }
     
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -124,14 +128,19 @@ public class SwiftFlutterRadioPlayerPlugin: NSObject, FlutterPlugin {
     
     @objc private func onRecieve(_ notification: Notification) {
         // unwrapping optional
-        if let playerEvent = notification.userInfo!["status"] {
+        if let playerEvent = notification.userInfo!["status"] as? String {
             print("Notification received with event name: \(playerEvent)")
             SwiftFlutterRadioPlayerPlugin.mEventSink?(playerEvent)
         }
         
-        if let metaDataEvent = notification.userInfo!["meta_data"] {
+        if let metaDataEvent = notification.userInfo!["meta_data"] as? String {
             print("Notification received with metada: \(metaDataEvent)")
-            SwiftFlutterRadioPlayerPlugin.eventSinkMetadata?(metaDataEvent as! String)
+            SwiftFlutterRadioPlayerPlugin.eventSinkMetadata?(metaDataEvent)
+        }
+        
+        if let volumeEvent = notification.userInfo!["volume"] {
+            print("Notification received with volume: \(volumeEvent)")
+            SwiftFlutterRadioPlayerPlugin.eventSinkVolume?(volumeEvent as! Float)
         }
     }
     
@@ -165,3 +174,17 @@ class MetaDataStreamHandler: NSObject, FlutterStreamHandler {
         return nil;
     }
 }
+
+
+class VolumeStreamHandler: NSObject, FlutterStreamHandler {
+    public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+        SwiftFlutterRadioPlayerPlugin.eventSinkVolume = events
+        return nil;
+    }
+    
+    public func onCancel(withArguments arguments: Any?) -> FlutterError? {
+        SwiftFlutterRadioPlayerPlugin.eventSinkVolume = nil
+        return nil;
+    }
+}
+
