@@ -97,14 +97,20 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
 
+        logger.info("onStartCommand: ${intent?.action}")
         if (intent != null) {
             when (intent.action) {
                 ACTION_INIT_PLAYER -> {
-                    if (player != null/* && isPlaying()*/) {
+                    logger.info("onStartCommand: $ACTION_INIT_PLAYER - ${player == null} ")
+                    if (player != null && isPlaying()) {
                         reEmmitEvents()
-                        Handler(Looper.getMainLooper()).postDelayed({ reEmmitEvents() }, 1500)
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            reEmmitEvents()
+                        }, 1500)
                         return START_STICKY
                     }
+
+                    logger.info("$ACTION_INIT_PLAYER not playing ! ======>")
 
                     notificationTitle = intent.getStringExtra("appName") ?: ""
                     notificationSubTitle = intent.getStringExtra("subTitle") ?: ""
@@ -145,28 +151,38 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
         return START_STICKY
     }
 
+    override fun onBind(intent: Intent?): IBinder {
+        return iBinder
+    }
+
+    override fun onDestroy() {
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            mediaSession?.release()
+        }
+
+        mediaSessionConnector?.setPlayer(null)
+        playerNotificationManager?.setPlayer(null)
+        player?.release()
+        stopForeground(true)
+
+        super.onDestroy()
+    }
+
     /*===========================
      *        Player APIS
      *===========================
      */
 
     private fun play() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            audioManager!!.requestAudioFocus(focusRequest!!)
-        } else {
-            audioManager!!.requestAudioFocus(this, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
-        }
+        requestAudioFocus()
         player?.seekToDefaultPosition()
         player?.playWhenReady = true
         wasPlaying = false
     }
 
     private fun newPlay() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            audioManager!!.requestAudioFocus(focusRequest!!)
-        } else {
-            audioManager!!.requestAudioFocus(this, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
-        }
+        requestAudioFocus()
         player?.stop()
         player?.prepare()
         player?.playWhenReady = true
@@ -179,7 +195,9 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
     }
 
     fun isPlaying(): Boolean {
-        return playbackStatus == PlaybackStatus.PLAYING
+        return if (this@StreamingCore::playbackStatus.isInitialized)
+            playbackStatus == PlaybackStatus.PLAYING
+        else false
     }
 
     private fun stop() {
@@ -205,11 +223,6 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
         player?.playWhenReady = playWhenReady
     }
 
-    private var delayedStopRunnable = Runnable {
-//        stop()
-    }
-
-
     private fun initStreamPlayer(streamUrl: String, playWhenReady: Boolean, coverImageUrl: String?) {
         player = SimpleExoPlayer
                 .Builder(this@StreamingCore)
@@ -227,7 +240,6 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
                 .build()
 
         player?.volume = 0.5f
-
 
         setupAudioFocus()
 
@@ -267,7 +279,8 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
         if (resId != null)
             playerNotificationManager?.setSmallIcon(resId)
 
-        playbackStatus = PlaybackStatus.PLAYING
+        if (playWhenReady)
+            playbackStatus = if (playWhenReady) PlaybackStatus.PLAYING else PlaybackStatus.PAUSED
     }
 
     private fun processIcyMetaData(metadata: Metadata) {
@@ -297,6 +310,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
         return object : Player.EventListener {
 
             override fun onPlayerStateChanged(playWhenReady: Boolean, playbackState: Int) {
+                logger.info("onPlayerStateChanged:  $playbackState")
                 playbackStatus = when (playbackState) {
                     Player.STATE_ENDED -> {
                         pushEvent(FLUTTER_RADIO_PLAYER_STOPPED)
@@ -317,11 +331,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
 
                 }
                 if (playbackStatus == PlaybackStatus.PLAYING) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        this@StreamingCore.audioManager!!.requestAudioFocus(this@StreamingCore.focusRequest!!)
-                    } else {
-                        this@StreamingCore.audioManager!!.requestAudioFocus(this@StreamingCore, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
-                    }
+                    requestAudioFocus()
                 } else {
                     logger.info("Remove player as a foreground notification...")
                     stopForeground(false)
@@ -335,6 +345,14 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
                 playbackStatus = PlaybackStatus.ERROR
                 error.printStackTrace()
             }
+        }
+    }
+
+    private fun requestAudioFocus() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            this@StreamingCore.audioManager!!.requestAudioFocus(this@StreamingCore.focusRequest!!)
+        } else {
+            this@StreamingCore.audioManager!!.requestAudioFocus(this@StreamingCore, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
         }
     }
 
@@ -455,31 +473,16 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
         }
     }
 
-    override fun onBind(intent: Intent?): IBinder {
-        return iBinder
-    }
-
-    override fun onDestroy() {
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            mediaSession?.release()
-        }
-
-        mediaSessionConnector?.setPlayer(null)
-        playerNotificationManager?.setPlayer(null)
-        player?.release()
-        stopForeground(true)
-
-        super.onDestroy()
-    }
-
     override fun onAudioFocusChange(audioFocus: Int) {
+        logger.info("onAudioFocusChange: $audioFocus")
+
         when (audioFocus) {
 
             AudioManager.AUDIOFOCUS_GAIN -> {
                 player?.volume = 0.5f
                 if (wasPlaying) {
-                    newPlay()
+//                    newPlay()
+                    play()
                 }
             }
 
@@ -554,7 +557,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
     }
 
     private fun pushEvent(eventName: String) {
-//        logger.info("Pushing Event: $eventName")
+        logger.info("Pushing Event: $eventName")
         localBroadcastManager.sendBroadcast(Intent(BROADCAST_ACTION_PLAYBACK_STATUS).putExtra("status", eventName))
     }
 

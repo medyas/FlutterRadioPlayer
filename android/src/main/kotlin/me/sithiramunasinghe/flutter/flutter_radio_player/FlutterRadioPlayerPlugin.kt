@@ -36,10 +36,9 @@ class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware
     private var mEventMetaDataSink: EventSink? = null
     private var mEventVolumeSink: EventSink? = null
 
-    var isBound = false
-    lateinit var applicationContext: Context
-    lateinit var coreService: StreamingCore
-    private lateinit var serviceIntent: Intent
+    private var isBound = false
+    private lateinit var applicationContext: Context
+    private var coreService: StreamingCore? = null
 
     private val intentFilter = IntentFilter().apply {
         addAction(BROADCAST_ACTION_PLAYBACK_STATUS)
@@ -144,7 +143,6 @@ class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware
         methodChannel.setMethodCallHandler(this)
 
         applicationContext = context
-        serviceIntent = Intent(applicationContext, StreamingCore::class.java)
 
         initEventChannelStatus(messenger)
         initEventChannelMetaData(messenger)
@@ -212,7 +210,7 @@ class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware
 
         if (!isBound) {
             logger.info("Service not bound, binding now....")
-            serviceIntent = createInitIntentData(serviceIntent, buildPlayerDetailsMeta(methodCall))
+            val serviceIntent = createInitIntentData(Intent(applicationContext, StreamingCore::class.java), buildPlayerDetailsMeta(methodCall))
             applicationContext.bindService(serviceIntent, serviceConnection, Context.BIND_IMPORTANT)
             applicationContext.startService(serviceIntent)
         } else {
@@ -224,7 +222,7 @@ class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware
 
 
     private fun isPlaying(): Boolean {
-        return coreService.isPlaying()
+        return coreService?.isPlaying() ?: false
     }
 
     private fun playOrPause() {
@@ -309,9 +307,8 @@ class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             val localBinder = binder as StreamingCore.LocalBinder
             coreService = localBinder.service
-            coreService.activityJavaClass = activityJavaClass
+            coreService?.activityJavaClass = activityJavaClass
             isBound = true
-//            coreService.reEmmitSatus()
             logger.info("Service Connection Established...")
             logger.info("Service bounded...")
 
