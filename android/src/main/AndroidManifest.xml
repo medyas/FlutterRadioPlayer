@@ -10,6 +10,13 @@
         android:supportsRtl="true">
         <!-- android:stopWithTask="true" -->
         <service android:name=".core.StreamingCore" />
+
+        <receiver android:name="androidx.media.session.MediaButtonReceiver" >
+           <intent-filter>
+               <action android:name="android.intent.action.MEDIA_BUTTON" />
+               <action android:name="android.media.AUDIO_BECOMING_NOISY" />
+           </intent-filter>
+        </receiver>
     </application>
 </manifest>
 
