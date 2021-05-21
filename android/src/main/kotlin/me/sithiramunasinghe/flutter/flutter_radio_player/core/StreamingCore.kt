@@ -46,7 +46,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
     private val iBinder = LocalBinder()
     private lateinit var playbackStatus: PlaybackStatus
     private lateinit var dataSourceFactory: DefaultDataSourceFactory
-    private val localBroadcastManager = LocalBroadcastManager.getInstance(this@StreamingCore)
+    private lateinit var  localBroadcastManager: LocalBroadcastManager
 
     // class instances
     private val handler = Handler();
@@ -94,6 +94,10 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
             get() = this@StreamingCore
     }
 
+    override fun onCreate() {
+        super.onCreate()
+        localBroadcastManager = LocalBroadcastManager.getInstance(this@StreamingCore)
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
 
@@ -176,7 +180,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
 
     private fun play() {
         requestAudioFocus()
-        player?.seekToDefaultPosition()
+//        player?.seekToDefaultPosition()
         player?.playWhenReady = true
         wasPlaying = false
     }
@@ -227,7 +231,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
         player = SimpleExoPlayer
                 .Builder(this@StreamingCore)
                 .setMediaSourceFactory(
-                        DefaultMediaSourceFactory(this@StreamingCore).setLiveTargetOffsetMs(1000))
+                        DefaultMediaSourceFactory(this@StreamingCore)/*.setLiveTargetOffsetMs(1000)*/)
 //                .setLoadControl(CustomLoadControl
 //                        .Builder()
 //                        .setPrioritizeTimeOverSizeThresholds(true)
