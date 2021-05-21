@@ -52,6 +52,7 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
+<<<<<<< HEAD
     return Scaffold(
       appBar: AppBar(
         title: const Text('Flutter Radio Player Example'),
@@ -146,8 +147,27 @@ class _MyAppState extends State<MyApp> {
                     "http://5.9.16.111:8210/arabic_live",
                     "false",
                   );
-                })
-          ],
+                },
+              ),
+              SizedBox(
+                height: 15,
+              ),
+              Text("Metadata Track "),
+              StreamBuilder<String?>(
+                  stream: _flutterRadioPlayer.metaDataStream,
+                  builder: (context, snapshot) {
+                    return Text(snapshot.data ?? "**");
+                  }),
+              RaisedButton(
+                  child: Text("Change URL"),
+                  onPressed: () async {
+                    _flutterRadioPlayer.setUrl(
+                      "http://5.9.16.111:8210/arabic_live",
+                      "false",
+                    );
+                  })
+            ],
+          ),
         ),
       ),
       bottomNavigationBar: new BottomNavigationBar(

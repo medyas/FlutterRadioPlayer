@@ -17,6 +17,8 @@ class StreamingCore : NSObject, AVPlayerItemMetadataOutputPushDelegate {
     private var commandCenter: MPRemoteCommandCenter?
     private var playWhenReady: Bool = false
     private var wasPlaying: Bool = false
+    
+    private var nowPlayingInfo = [String: Any]()
 
     private var streamUrl:String = ""
     
@@ -75,7 +77,7 @@ class StreamingCore : NSObject, AVPlayerItemMetadataOutputPushDelegate {
         initPlayerObservers()
 
         // init Remote protocols.
-        initRemoteTransportControl(appName: serviceName, subTitle: secondTitle);
+        initRemoteTransportControl(appName: serviceName, subTitle: secondTitle, coverImageUrl: coverImageUrl);
         setupNotifications()
 
         if #available(iOS 10.0, *) {
@@ -155,14 +157,33 @@ class StreamingCore : NSObject, AVPlayerItemMetadataOutputPushDelegate {
     }
     
     func metadataOutput(_ output: AVPlayerItemMetadataOutput, didOutputTimedMetadataGroups groups: [AVTimedMetadataGroup], from track: AVPlayerItemTrack?) {
-      if let item = groups.first?.items.first // make this an AVMetadata item
-      {
-          item.value(forKeyPath: "value")
-          let song = (item.value(forKeyPath: "value")!)
-            pushEvent(typeEvent: "meta_data",eventName: song as! String)
-
+        
+        if let item = (groups.first?.items.first) {
+            let meta = item.value(forKeyPath: "value") as!  String
+            let list = meta.split(separator: "-")
+            if(list.count > 1) {
+                let title = String(list[0])
+                let subTitle = Array(list[1..<list.count]).joined(separator: "-")
+                self.setTitle(title: title, subTitle: subTitle)
+                
+                pushEvent(typeEvent: "meta_data",eventName: title+":"+subTitle)
+            } else {
+                let title = String(list[0])
+                let subTitle = ""
+                self.setTitle(title: title, subTitle: subTitle)
+                
+                pushEvent(typeEvent: "meta_data",eventName: title+":"+subTitle)
+            }
             
-        }}
+        }
+        
+    }
+    
+    @objc func systemVolumeDidChange(notification: NSNotification) {
+            if let volume = notification.userInfo?["AVSystemController_AudioVolumeNotificationParameter"] as? Float {
+            pushEvent(typeEvent:"volume", eventName: volume)
+        }
+    }
     
     func play() -> PlayerStatus {
         print("invoking play method on service")
@@ -219,12 +240,14 @@ class StreamingCore : NSObject, AVPlayerItemMetadataOutputPushDelegate {
         let formattedVolume = volume.floatValue;
         print("Setting volume to: \(formattedVolume)")
         avPlayer?.volume = formattedVolume
+        pushEvent(typeEvent:"volume", eventName: formattedVolume)
     }
 
      func setTitle(title: String, subTitle:String) -> Void {
         print("Setting title to: \(title)")
-        let nowPlayingInfo = [MPMediaItemPropertyTitle : title, MPMediaItemPropertyArtist: subTitle]
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+        self.nowPlayingInfo[MPMediaItemPropertyTitle] = title
+        self.nowPlayingInfo[MPMediaItemPropertyArtist] = subTitle
+        self.updateNowPlayingInfo()
      }
     
     func setUrl(streamURL: String, playWhenReady: String) -> Void {
@@ -241,80 +264,78 @@ class StreamingCore : NSObject, AVPlayerItemMetadataOutputPushDelegate {
         }
     }
     
-    private func pushEvent(typeEvent : String = "status", eventName: String) {
+    private func pushEvent(typeEvent : String = "status", eventName: Any) {
         print("Pushing event: \(eventName)")
         NotificationCenter.default.post(name: Notifications.playbackNotification, object: nil, userInfo: [typeEvent: eventName])
     }
     
-    private func initRemoteTransportControl(appName: String, subTitle: String) {
+    private func initRemoteTransportControl(appName: String, subTitle: String, coverImageUrl: String) {
         
-        do {
-            commandCenter = MPRemoteCommandCenter.shared()
-            
-            // build now playing info
-            //TODO ===========================================================
-            let nowPlayingInfo = [MPMediaItemPropertyTitle : appName, MPMediaItemPropertyArtist: subTitle]
-            
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
-            
-            // basic command center options
-            commandCenter?.togglePlayPauseCommand.isEnabled = true
-            commandCenter?.playCommand.isEnabled = true
-            commandCenter?.pauseCommand.isEnabled = true
-            commandCenter?.nextTrackCommand.isEnabled = false
-            commandCenter?.previousTrackCommand.isEnabled = false
-            commandCenter?.changePlaybackRateCommand.isEnabled = false
-            commandCenter?.skipForwardCommand.isEnabled = false
-            commandCenter?.skipBackwardCommand.isEnabled = false
-            commandCenter?.ratingCommand.isEnabled = false
-            commandCenter?.likeCommand.isEnabled = false
-            commandCenter?.dislikeCommand.isEnabled = false
-            commandCenter?.bookmarkCommand.isEnabled = false
-            commandCenter?.changeRepeatModeCommand.isEnabled = false
-            commandCenter?.changeShuffleModeCommand.isEnabled = false
-            
-            // only available in iOS 9
-            if #available(iOS 9.0, *) {
-                commandCenter?.enableLanguageOptionCommand.isEnabled = false
-                commandCenter?.disableLanguageOptionCommand.isEnabled = false
-            }
-            
-            // control center play button callback
-//            commandCenter?.playCommand.remo
-            commandCenter?.playCommand.addTarget { (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus in
-                print("command center play command...")
-                _ = self.newPlay()
-                return .success
-            }
-            
-            // control center pause button callback
-            commandCenter?.pauseCommand.addTarget { (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus in
-                print("command center pause command...")
-                _ = self.pause()
-                return .success
-            }
-            
-            // control center stop button callback
-            commandCenter?.stopCommand.addTarget { (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus in
-                print("command center stop command...")
-                _ = self.stop()
-                return .success
-            }
-            
-            // create audio session for background playback and control center callbacks.
-            let audioSession = AVAudioSession.sharedInstance()
-            
-            if #available(iOS 10.0, *) {
-                
-                try? audioSession.setCategory(.playback, mode: .default)
-                try? audioSession.overrideOutputAudioPort(.speaker)
-                try? audioSession.setActive(true)
-            }
-            
-            UIApplication.shared.beginReceivingRemoteControlEvents()
-        } catch {
-            print("Something went wrong ! \(error)")
+        commandCenter = MPRemoteCommandCenter.shared()
+        
+        // build now playing info
+        self.loadCoverImageFromUrl(coverImageUrl: coverImageUrl)
+        self.nowPlayingInfo[MPMediaItemPropertyTitle] = appName
+        self.nowPlayingInfo[MPMediaItemPropertyArtist] = subTitle
+        self.updateNowPlayingInfo()
+        
+        
+        // basic command center options
+        commandCenter?.togglePlayPauseCommand.isEnabled = true
+        commandCenter?.playCommand.isEnabled = true
+        commandCenter?.pauseCommand.isEnabled = true
+        commandCenter?.nextTrackCommand.isEnabled = false
+        commandCenter?.previousTrackCommand.isEnabled = false
+        commandCenter?.changePlaybackRateCommand.isEnabled = false
+        commandCenter?.skipForwardCommand.isEnabled = false
+        commandCenter?.skipBackwardCommand.isEnabled = false
+        commandCenter?.ratingCommand.isEnabled = false
+        commandCenter?.likeCommand.isEnabled = false
+        commandCenter?.dislikeCommand.isEnabled = false
+        commandCenter?.bookmarkCommand.isEnabled = false
+        commandCenter?.changeRepeatModeCommand.isEnabled = false
+        commandCenter?.changeShuffleModeCommand.isEnabled = false
+        
+        // only available in iOS 9
+        if #available(iOS 9.0, *) {
+            commandCenter?.enableLanguageOptionCommand.isEnabled = false
+            commandCenter?.disableLanguageOptionCommand.isEnabled = false
         }
+        
+        // control center play button callback
+//            commandCenter?.playCommand.remo
+        commandCenter?.playCommand.addTarget { (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus in
+            print("command center play command...")
+            _ = self.newPlay()
+            return .success
+        }
+        
+        // control center pause button callback
+        commandCenter?.pauseCommand.addTarget { (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus in
+            print("command center pause command...")
+            _ = self.pause()
+            return .success
+        }
+        
+        // control center stop button callback
+        commandCenter?.stopCommand.addTarget { (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus in
+            print("command center stop command...")
+            _ = self.stop()
+            return .success
+        }
+        
+        // create audio session for background playback and control center callbacks.
+        let audioSession = AVAudioSession.sharedInstance()
+        
+        if #available(iOS 10.0, *) {
+            
+            try? audioSession.setCategory(.playback, mode: .default)
+            try? audioSession.overrideOutputAudioPort(.speaker)
+            try? audioSession.setActive(true)
+        }
+        
+        UIApplication.shared.beginReceivingRemoteControlEvents()
+        
     }
 
     private func initPlayerObservers() {
@@ -324,6 +345,11 @@ class StreamingCore : NSObject, AVPlayerItemMetadataOutputPushDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(itemNewErrorLogEntry(_:)), name: .AVPlayerItemNewErrorLogEntry, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(itemFailedToPlayToEndTime(_:)), name: .AVPlayerItemFailedToPlayToEndTime, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(itemPlaybackStalled(_:)), name: .AVPlayerItemPlaybackStalled, object: nil)
+        NotificationCenter.default.addObserver(self,
+                    selector: #selector(systemVolumeDidChange),
+                    name: NSNotification.Name(rawValue: "AVSystemController_SystemVolumeDidChangeNotification"),
+                    object: nil
+                )
         
         self.avPlayer?.addObserver(self, forKeyPath: #keyPath(AVPlayer.status), options: [.new,.initial], context: nil)
         self.avPlayer?.addObserver(self, forKeyPath: #keyPath(AVPlayer.currentItem.status), options:[.new,.initial], context: nil)
@@ -332,14 +358,14 @@ class StreamingCore : NSObject, AVPlayerItemMetadataOutputPushDelegate {
     
     
     
-    @objc func itemNewErrorLogEntry(_ notification:Notification){
+    @objc func itemNewErrorLogEntry(_ notification:Notification) {
         print(notification)
     }
     
     @objc func itemFailedToPlayToEndTime(_ notification:Notification){
         if let _ = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey]{
             _ = stop()
-            print("Observer: Failed...\(notification.userInfo)")
+            print("Observer: Failed...\(String(describing: notification.userInfo))")
             playerStatus = Constants.FLUTTER_RADIO_ERROR
 
             pushEvent(eventName: Constants.FLUTTER_RADIO_ERROR)
@@ -381,7 +407,7 @@ class StreamingCore : NSObject, AVPlayerItemMetadataOutputPushDelegate {
                                 ? Constants.FLUTTER_RADIO_PLAYING
                                 : Constants.FLUTTER_RADIO_PAUSED)
                     if !isPlaying() && self.playWhenReady {
-                        play()
+                        _ = play()
                     }
                 }
                 
@@ -415,27 +441,30 @@ class StreamingCore : NSObject, AVPlayerItemMetadataOutputPushDelegate {
         }
     }
 
-    private func loadCoverImageFromUrl() {
+    func loadCoverImageFromUrl(coverImageUrl: String) {
         DispatchQueue.global().async {
-                if let url = URL(string: imageMetas)  {
-                    if let data = try? Data.init(contentsOf: url), let image = UIImage(data: data) {
-                        let artwork = MPMediaItemArtwork(boundsSize: image.size, requestHandler: { (_ size : CGSize) -> UIImage in
-                            return image
-                        })
-                        DispatchQueue.main.async {
-                            if(self.audioMetas == audioMetas){ //always the sam song ?
-                                print(self.nowPlayingInfo.description)
-                                
-                                self.nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
-                                MPNowPlayingInfoCenter.default().nowPlayingInfo = self.nowPlayingInfo
-                            }
-                        }
+            if let url = URL(string: coverImageUrl)  {
+                if let data = try? Data.init(contentsOf: url), let image = UIImage(data: data) {
+                    let artwork = MPMediaItemArtwork(boundsSize: image.size, requestHandler: { (_ size : CGSize) -> UIImage in
+                        return image
+                    })
+                    DispatchQueue.main.async {
+                        print(self.nowPlayingInfo.description)
+                        
+                        self.nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+                        self.updateNowPlayingInfo()
                     }
                 }
             }
         }
     }
     
+    func updateNowPlayingInfo() {
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = self.nowPlayingInfo
+    }
+    
 }
+
+
 
 
