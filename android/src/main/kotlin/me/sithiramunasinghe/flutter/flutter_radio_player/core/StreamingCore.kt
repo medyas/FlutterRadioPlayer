@@ -9,12 +9,13 @@ import android.graphics.BitmapFactory
 import android.graphics.drawable.Drawable
 import android.media.AudioFocusRequest
 import android.media.AudioManager
-import android.media.session.MediaSession
 import android.net.Uri
 import android.os.*
 import android.support.v4.media.session.MediaSessionCompat
+import android.view.KeyEvent
 import androidx.annotation.Nullable
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import androidx.media.session.MediaButtonReceiver
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.target.CustomTarget
 import com.google.android.exoplayer2.*
@@ -46,29 +47,37 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
     private val iBinder = LocalBinder()
     private lateinit var playbackStatus: PlaybackStatus
     private lateinit var dataSourceFactory: DefaultDataSourceFactory
-    private lateinit var  localBroadcastManager: LocalBroadcastManager
+    private lateinit var localBroadcastManager: LocalBroadcastManager
 
     // class instances
-    private val handler = Handler();
+    private val handler = Handler(Looper.getMainLooper())
 
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
     private var player: SimpleExoPlayer? = null
     private var mediaSessionConnector: MediaSessionConnector? = null
-    private var mediaSession: MediaSession? = null
+    private var mediaSessionCompat: MediaSessionCompat? = null
     private var playerNotificationManager: PlayerNotificationManager? = null
 
     var notificationTitle = ""
     var notificationSubTitle = ""
 
-    var wasPlaying: Boolean = false
+    private var wasPlaying: Boolean = false
 
     // session keys
     private val playbackNotificationId = 1025
 
+    private val mediaSessionCallback = object : MediaSessionCompat.Callback() {
+        override fun onMediaButtonEvent(mediaButtonEvent: Intent?): Boolean {
+            onIntentReceive(mediaButtonEvent)
+            return super.onMediaButtonEvent(mediaButtonEvent)
+        }
+    }
+
     companion object {
 
-        const val MANIFEST_NOTIFICATION_PLACEHOLDER = "flutter.radio.player.notification.placeholder"
+        const val MANIFEST_NOTIFICATION_PLACEHOLDER =
+            "flutter.radio.player.notification.placeholder"
         const val MANIFEST_NOTIFICATION_ICON = "flutter.radio.player.notification.icon"
 
         private const val mediaSessionId = "streaming_audio_player_media_session"
@@ -102,7 +111,16 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
 
         logger.info("onStartCommand: ${intent?.action}")
-        if (intent != null) {
+
+        MediaButtonReceiver.handleIntent(mediaSessionCompat, intent)
+
+        handleIntent(intent)
+
+        return START_STICKY
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        if(intent != null) {
             when (intent.action) {
                 ACTION_INIT_PLAYER -> {
                     logger.info("onStartCommand: $ACTION_INIT_PLAYER - ${player == null} ")
@@ -111,7 +129,6 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
                         Handler(Looper.getMainLooper()).postDelayed({
                             reEmmitEvents()
                         }, 1500)
-                        return START_STICKY
                     }
 
                     logger.info("$ACTION_INIT_PLAYER not playing ! ======>")
@@ -142,17 +159,53 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
                     reEmmitPlaybackStatus()
                 }
                 ACTION_RE_EMMIT_EVENTS -> reEmmitEvents()
-                ACTION_UPDATE_TITLE -> setTitle(intent.getStringExtra("appName")
-                        ?: "", intent.getStringExtra("subTitle") ?: "")
-                ACTION_UPDATE_STREAM_URL -> setUrl(intent.getStringExtra("streamUrl")
-                        ?: "", intent.getStringExtra("playWhenReady") == "true")
+                ACTION_UPDATE_TITLE -> setTitle(
+                    intent.getStringExtra("appName")
+                        ?: "", intent.getStringExtra("subTitle") ?: ""
+                )
+                ACTION_UPDATE_STREAM_URL -> setUrl(
+                    intent.getStringExtra("streamUrl")
+                        ?: "", intent.getStringExtra("playWhenReady") == "true"
+                )
                 else -> {
 
                 }
             }
         }
+    }
 
-        return START_STICKY
+    private fun getAdjustedKeyCode(keyEvent: KeyEvent): Int {
+        val keyCode = keyEvent.keyCode
+        return if (keyCode == KeyEvent.KEYCODE_MEDIA_PLAY || keyCode == KeyEvent.KEYCODE_MEDIA_PAUSE) {
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+        } else keyCode
+    }
+
+    private fun mapAction(keyCode: Int): String? {
+        return when (keyCode) {
+            KeyEvent.KEYCODE_MEDIA_PLAY -> ACTION_PLAY
+            KeyEvent.KEYCODE_MEDIA_PAUSE -> ACTION_PAUSE
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> ACTION_TOGGLE_PLAYER
+            KeyEvent.KEYCODE_MEDIA_STOP -> ACTION_STOP
+            else -> null
+        }
+    }
+
+    fun onIntentReceive(intent: Intent?) {
+        if (intent == null) {
+            return
+        }
+        if (intent.action != Intent.ACTION_MEDIA_BUTTON) {
+            return
+        }
+        (intent.extras?.get(Intent.EXTRA_KEY_EVENT) as? KeyEvent)
+            ?.takeIf { it.action == KeyEvent.ACTION_DOWN }
+            ?.let { getAdjustedKeyCode(it) }
+            ?.let { mapAction(it) }
+            ?.let { action ->
+                handleIntent(Intent(action))
+            }
+
     }
 
     override fun onBind(intent: Intent?): IBinder {
@@ -162,7 +215,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
     override fun onDestroy() {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            mediaSession?.release()
+            mediaSessionCompat?.release()
         }
 
         mediaSessionConnector?.setPlayer(null)
@@ -227,11 +280,16 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
         player?.playWhenReady = playWhenReady
     }
 
-    private fun initStreamPlayer(streamUrl: String, playWhenReady: Boolean, coverImageUrl: String?) {
+    private fun initStreamPlayer(
+        streamUrl: String,
+        playWhenReady: Boolean,
+        coverImageUrl: String?
+    ) {
         player = SimpleExoPlayer
-                .Builder(this@StreamingCore)
-                .setMediaSourceFactory(
-                        DefaultMediaSourceFactory(this@StreamingCore)/*.setLiveTargetOffsetMs(1000)*/)
+            .Builder(this@StreamingCore)
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(this@StreamingCore)/*.setLiveTargetOffsetMs(1000)*/
+            )
 //                .setLoadControl(CustomLoadControl
 //                        .Builder()
 //                        .setPrioritizeTimeOverSizeThresholds(true)
@@ -241,13 +299,16 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
 //                                10000)
 //                        .build()
 //                )
-                .build()
+            .build()
 
         player?.volume = 0.5f
 
         setupAudioFocus()
 
-        dataSourceFactory = DefaultDataSourceFactory(this@StreamingCore, Util.getUserAgent(this@StreamingCore, notificationTitle))
+        dataSourceFactory = DefaultDataSourceFactory(
+            this@StreamingCore,
+            Util.getUserAgent(this@StreamingCore, notificationTitle)
+        )
 
         val audioSource = buildMediaSource(dataSourceFactory, streamUrl)
 
@@ -266,10 +327,11 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
 
         createPlayerNotificationManager(coverImageUrl)
 
-        val mediaSession = MediaSessionCompat(this@StreamingCore, mediaSessionId)
-        mediaSession.isActive = true
+        mediaSessionCompat = MediaSessionCompat(this@StreamingCore, mediaSessionId)
+        mediaSessionCompat?.isActive = true
+        mediaSessionCompat?.setCallback(mediaSessionCallback)
 
-        mediaSessionConnector = MediaSessionConnector(mediaSession)
+        mediaSessionConnector = MediaSessionConnector(mediaSessionCompat!!)
         mediaSessionConnector?.setPlayer(player)
 
 //        val dispatcher = CustomControlDispatcher(0, 0)
@@ -278,7 +340,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
         playerNotificationManager?.setUseStopAction(true)
         playerNotificationManager?.setUsePlayPauseActions(true)
         playerNotificationManager?.setPlayer(player)
-        playerNotificationManager?.setMediaSessionToken(mediaSession.sessionToken)
+        playerNotificationManager?.setMediaSessionToken(mediaSessionCompat!!.sessionToken)
         val resId = loadLocalDrawable(MANIFEST_NOTIFICATION_ICON)
         if (resId != null)
             playerNotificationManager?.setSmallIcon(resId)
@@ -294,14 +356,15 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
             if (entry is IcyInfo) {
                 val icyInfo = entry as IcyInfo
                 val info = icyInfo.title
-                        ?.split(" - ")
-                        ?.map { it.trim().replace("-", " ") }
-                        ?.filter { it.isNotEmpty() }
+                    ?.split(" - ")
+                    ?.map { it.trim().replace("-", " ") }
+                    ?.filter { it.isNotEmpty() }
                 info?.let {
 //                    logger.info("MetadataOutput ---------- ${info.joinToString(separator = " - ")}")
 
                     notificationTitle = if (info.isNotEmpty()) info[0] else ""
-                    notificationSubTitle = if (info.size > 1) info.subList(1, info.size).joinToString(separator = " - ") else ""
+                    notificationSubTitle = if (info.size > 1) info.subList(1, info.size)
+                        .joinToString(separator = " - ") else ""
 
                     playerNotificationManager?.invalidate()
                     reEmmitMetaData()
@@ -356,88 +419,109 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             this@StreamingCore.audioManager!!.requestAudioFocus(this@StreamingCore.focusRequest!!)
         } else {
-            this@StreamingCore.audioManager!!.requestAudioFocus(this@StreamingCore, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+            this@StreamingCore.audioManager!!.requestAudioFocus(
+                this@StreamingCore,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN
+            )
         }
     }
 
     private fun createPlayerNotificationManager(coverImageUrl: String?) {
         playerNotificationManager = PlayerNotificationManager.createWithNotificationChannel(
-                this@StreamingCore,
-                playbackChannelId,
-                R.string.channel_name,
-                R.string.channel_description,
-                playbackNotificationId,
-                object : PlayerNotificationManager.MediaDescriptionAdapter {
+            this@StreamingCore,
+            playbackChannelId,
+            R.string.channel_name,
+            R.string.channel_description,
+            playbackNotificationId,
+            object : PlayerNotificationManager.MediaDescriptionAdapter {
 
-                    override fun getCurrentContentTitle(player: Player): String {
-                        return notificationTitle
+                override fun getCurrentContentTitle(player: Player): String {
+                    return notificationTitle
+                }
+
+                @Nullable
+                override fun createCurrentContentIntent(player: Player): PendingIntent {
+                    val i = Intent(this@StreamingCore, activityJavaClass!!)
+                    val contentPendingIntent =
+                        PendingIntent.getActivity(this@StreamingCore, 0, i, 0);
+                    return contentPendingIntent
+                }
+
+                @Nullable
+                override fun getCurrentContentText(player: Player): String? {
+                    return notificationSubTitle
+                }
+
+                @Nullable
+                override fun getCurrentLargeIcon(
+                    player: Player,
+                    callback: PlayerNotificationManager.BitmapCallback
+                ): Bitmap? {
+                    if (coverImageUrl != null) {
+                        loadCoverImageFromUrl(coverImageUrl, callback)
                     }
 
-                    @Nullable
-                    override fun createCurrentContentIntent(player: Player): PendingIntent {
-                        val i = Intent(this@StreamingCore, activityJavaClass!!)
-                        val contentPendingIntent = PendingIntent.getActivity(this@StreamingCore, 0, i, 0);
-                        return contentPendingIntent
-                    }
+                    return loadLocalBitmap(MANIFEST_NOTIFICATION_PLACEHOLDER)
+                }
 
-                    @Nullable
-                    override fun getCurrentContentText(player: Player): String? {
-                        return notificationSubTitle
-                    }
+            },
+            object : PlayerNotificationManager.NotificationListener {
+                override fun onNotificationCancelled(
+                    notificationId: Int,
+                    dismissedByUser: Boolean
+                ) {
+                    stop()
+                }
 
-                    @Nullable
-                    override fun getCurrentLargeIcon(player: Player, callback: PlayerNotificationManager.BitmapCallback): Bitmap? {
-                        if (coverImageUrl != null) {
-                            loadCoverImageFromUrl(coverImageUrl, callback)
-                        }
-
-                        return loadLocalBitmap(MANIFEST_NOTIFICATION_PLACEHOLDER)
-                    }
-
-                },
-                object : PlayerNotificationManager.NotificationListener {
-                    override fun onNotificationCancelled(notificationId: Int, dismissedByUser: Boolean) {
-                        stop()
-                    }
-
-                    override fun onNotificationPosted(notificationId: Int, notification: Notification, ongoing: Boolean) {
-                        startForeground(notificationId, notification)
+                override fun onNotificationPosted(
+                    notificationId: Int,
+                    notification: Notification,
+                    ongoing: Boolean
+                ) {
+                    startForeground(notificationId, notification)
 //                        if (!ongoing) {
 //                            stopForeground(false)
 //                        }
-                    }
                 }
+            }
         )
     }
 
-    private fun loadCoverImageFromUrl(coverImageUrl: String, callback: PlayerNotificationManager.BitmapCallback) {
+    private fun loadCoverImageFromUrl(
+        coverImageUrl: String,
+        callback: PlayerNotificationManager.BitmapCallback
+    ) {
         Glide.with(this@StreamingCore)
-                .asBitmap()
-                .timeout(5000)
-                .load(coverImageUrl)
-                .into(object : CustomTarget<Bitmap>() {
-                    override fun onLoadFailed(errorDrawable: Drawable?) {
-                        try {
-                            val placeHolder = loadLocalBitmap(MANIFEST_NOTIFICATION_PLACEHOLDER)
-                            if (placeHolder != null) {
-                                callback.onBitmap(placeHolder)
-                            } else {
-                                throw Exception("Failed to load placeholder !")
-                            }
-                        } catch (t: Throwable) {
-                            t.printStackTrace()
-                            logger.info("Bitmap Error: ${t.message}")
+            .asBitmap()
+            .timeout(5000)
+            .load(coverImageUrl)
+            .into(object : CustomTarget<Bitmap>() {
+                override fun onLoadFailed(errorDrawable: Drawable?) {
+                    try {
+                        val placeHolder = loadLocalBitmap(MANIFEST_NOTIFICATION_PLACEHOLDER)
+                        if (placeHolder != null) {
+                            callback.onBitmap(placeHolder)
+                        } else {
+                            throw Exception("Failed to load placeholder !")
                         }
+                    } catch (t: Throwable) {
+                        t.printStackTrace()
+                        logger.info("Bitmap Error: ${t.message}")
                     }
+                }
 
-                    override fun onResourceReady(resource: Bitmap, transition: com.bumptech.glide.request.transition.Transition<in Bitmap>?) {
-                        callback.onBitmap(resource)
-                    }
+                override fun onResourceReady(
+                    resource: Bitmap,
+                    transition: com.bumptech.glide.request.transition.Transition<in Bitmap>?
+                ) {
+                    callback.onBitmap(resource)
+                }
 
-                    override fun onLoadCleared(placeholder: Drawable?) {
+                override fun onLoadCleared(placeholder: Drawable?) {
 
-                    }
-                })
+                }
+            })
     }
 
     private fun loadLocalDrawable(path: String): Int? {
@@ -473,7 +557,11 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             focusRequest?.let { audioManager!!.requestAudioFocus(it) }
         } else {
-            audioManager!!.requestAudioFocus(this, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+            audioManager!!.requestAudioFocus(
+                this,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN
+            )
         }
     }
 
@@ -553,31 +641,50 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
     }
 
     private fun reEmmitMetaData() {
-        localBroadcastManager.sendBroadcast(Intent(BROADCAST_ACTION_META_DATA).putExtra("meta_data", "$notificationTitle:$notificationSubTitle"))
+        localBroadcastManager.sendBroadcast(
+            Intent(BROADCAST_ACTION_META_DATA).putExtra(
+                "meta_data",
+                "$notificationTitle:$notificationSubTitle"
+            )
+        )
     }
 
     private fun reEmmitVolume() {
-        localBroadcastManager.sendBroadcast(Intent(BROADCAST_ACTION_VOLUME).putExtra("volume", player?.volume))
+        localBroadcastManager.sendBroadcast(
+            Intent(BROADCAST_ACTION_VOLUME).putExtra(
+                "volume",
+                player?.volume
+            )
+        )
     }
 
     private fun pushEvent(eventName: String) {
         logger.info("Pushing Event: $eventName")
-        localBroadcastManager.sendBroadcast(Intent(BROADCAST_ACTION_PLAYBACK_STATUS).putExtra("status", eventName))
+        localBroadcastManager.sendBroadcast(
+            Intent(BROADCAST_ACTION_PLAYBACK_STATUS).putExtra(
+                "status",
+                eventName
+            )
+        )
     }
 
     /**
      * Build the media source depending of the URL content type.
      */
-    private fun buildMediaSource(dataSourceFactory: DefaultDataSourceFactory, streamUrl: String): MediaSource {
+    private fun buildMediaSource(
+        dataSourceFactory: DefaultDataSourceFactory,
+        streamUrl: String
+    ): MediaSource {
 
         val uri = Uri.parse(streamUrl)
 
         return when (val type = Util.inferContentType(uri)) {
 //            C.TYPE_DASH -> DashMediaSource.Factory(dataSourceFactory).createMediaSource(MediaItem.fromUri(uri))
-            C.TYPE_HLS -> HlsMediaSource.Factory(dataSourceFactory).createMediaSource(MediaItem.fromUri(uri))
+            C.TYPE_HLS -> HlsMediaSource.Factory(dataSourceFactory)
+                .createMediaSource(MediaItem.fromUri(uri))
             C.TYPE_OTHER -> ProgressiveMediaSource.Factory(dataSourceFactory)
 //                    .setContinueLoadingCheckIntervalBytes(1024*32)
-                    .createMediaSource(MediaItem.fromUri(uri))
+                .createMediaSource(MediaItem.fromUri(uri))
             else -> {
                 throw IllegalStateException("Unsupported type: $type")
             }

@@ -132,6 +132,7 @@ class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware
 
     override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
         methodChannel.setMethodCallHandler(null)
+        applicationContext = binding.applicationContext
         launchPlayerIntentWithAction(StreamingCore.ACTION_DESTROY)
         LocalBroadcastManager.getInstance(applicationContext).unregisterReceiver(broadcastReceiver)
     }
