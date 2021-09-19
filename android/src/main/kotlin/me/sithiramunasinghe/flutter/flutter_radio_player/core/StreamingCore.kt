@@ -678,16 +678,15 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
 
         val uri = Uri.parse(streamUrl)
 
-        return when (val type = Util.inferContentType(uri)) {
-//            C.TYPE_DASH -> DashMediaSource.Factory(dataSourceFactory).createMediaSource(MediaItem.fromUri(uri))
+        return when (Util.inferContentType(uri)) {
+            C.TYPE_DASH -> DashMediaSource.Factory(dataSourceFactory).createMediaSource(MediaItem.fromUri(uri))
             C.TYPE_HLS -> HlsMediaSource.Factory(dataSourceFactory)
                 .createMediaSource(MediaItem.fromUri(uri))
-            C.TYPE_OTHER -> ProgressiveMediaSource.Factory(dataSourceFactory)
+            else -> ProgressiveMediaSource.Factory(dataSourceFactory)
 //                    .setContinueLoadingCheckIntervalBytes(1024*32)
                 .createMediaSource(MediaItem.fromUri(uri))
-            else -> {
-                throw IllegalStateException("Unsupported type: $type")
-            }
+
+        }
         }
     }
 
