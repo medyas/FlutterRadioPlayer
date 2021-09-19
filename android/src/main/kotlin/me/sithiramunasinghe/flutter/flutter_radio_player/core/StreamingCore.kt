@@ -25,6 +25,7 @@ import com.google.android.exoplayer2.metadata.icy.IcyInfo
 import com.google.android.exoplayer2.source.DefaultMediaSourceFactory
 import com.google.android.exoplayer2.source.MediaSource
 import com.google.android.exoplayer2.source.ProgressiveMediaSource
+import com.google.android.exoplayer2.source.dash.DashMediaSource
 import com.google.android.exoplayer2.source.hls.HlsMediaSource
 import com.google.android.exoplayer2.ui.PlayerNotificationManager
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory
@@ -120,7 +121,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
     }
 
     private fun handleIntent(intent: Intent?) {
-        if(intent != null) {
+        if (intent != null) {
             when (intent.action) {
                 ACTION_INIT_PLAYER -> {
                     logger.info("onStartCommand: $ACTION_INIT_PLAYER - ${player == null} ")
@@ -679,14 +680,14 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
         val uri = Uri.parse(streamUrl)
 
         return when (Util.inferContentType(uri)) {
-            C.TYPE_DASH -> DashMediaSource.Factory(dataSourceFactory).createMediaSource(MediaItem.fromUri(uri))
+            C.TYPE_DASH -> DashMediaSource.Factory(dataSourceFactory)
+                .createMediaSource(MediaItem.fromUri(uri))
             C.TYPE_HLS -> HlsMediaSource.Factory(dataSourceFactory)
                 .createMediaSource(MediaItem.fromUri(uri))
             else -> ProgressiveMediaSource.Factory(dataSourceFactory)
 //                    .setContinueLoadingCheckIntervalBytes(1024*32)
                 .createMediaSource(MediaItem.fromUri(uri))
 
-        }
         }
     }
 
