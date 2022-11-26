@@ -13,7 +13,6 @@ import android.net.Uri
 import android.os.*
 import android.support.v4.media.session.MediaSessionCompat
 import android.view.KeyEvent
-import androidx.annotation.Nullable
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.media.session.MediaButtonReceiver
 import com.bumptech.glide.Glide
@@ -28,7 +27,7 @@ import com.google.android.exoplayer2.source.ProgressiveMediaSource
 import com.google.android.exoplayer2.source.dash.DashMediaSource
 import com.google.android.exoplayer2.source.hls.HlsMediaSource
 import com.google.android.exoplayer2.ui.PlayerNotificationManager
-import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory
+import com.google.android.exoplayer2.upstream.DefaultDataSource
 import com.google.android.exoplayer2.util.Util
 import me.sithiramunasinghe.flutter.flutter_radio_player.FlutterRadioPlayerPlugin.Companion.BROADCAST_ACTION_META_DATA
 import me.sithiramunasinghe.flutter.flutter_radio_player.FlutterRadioPlayerPlugin.Companion.BROADCAST_ACTION_PLAYBACK_STATUS
@@ -47,7 +46,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
     private var isBound = false
     private val iBinder = LocalBinder()
     private lateinit var playbackStatus: PlaybackStatus
-    private lateinit var dataSourceFactory: DefaultDataSourceFactory
+    private lateinit var dataSourceFactory: DefaultDataSource.Factory
     private lateinit var localBroadcastManager: LocalBroadcastManager
 
     // class instances
@@ -55,7 +54,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
 
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
-    private var player: SimpleExoPlayer? = null
+    private var player: ExoPlayer? = null
     private var mediaSessionConnector: MediaSessionConnector? = null
     private var mediaSessionCompat: MediaSessionCompat? = null
     private var playerNotificationManager: PlayerNotificationManager? = null
@@ -222,7 +221,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
         mediaSessionConnector?.setPlayer(null)
         playerNotificationManager?.setPlayer(null)
         player?.release()
-        stopForeground(true)
+        stopForegroundService()
 
         super.onDestroy()
     }
@@ -286,7 +285,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
         playWhenReady: Boolean,
         coverImageUrl: String?
     ) {
-        player = SimpleExoPlayer
+        player = ExoPlayer
             .Builder(this@StreamingCore)
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(this@StreamingCore)/*.setLiveTargetOffsetMs(1000)*/
@@ -306,9 +305,9 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
 
         setupAudioFocus()
 
-        dataSourceFactory = DefaultDataSourceFactory(
+        dataSourceFactory = DefaultDataSource.Factory(
             this@StreamingCore,
-            Util.getUserAgent(this@StreamingCore, notificationTitle)
+//            Util.getUserAgent(this@StreamingCore, notificationTitle)
         )
 
         val audioSource = buildMediaSource(dataSourceFactory, streamUrl)
@@ -319,11 +318,6 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
             it.playWhenReady = playWhenReady
             it.setMediaSource(audioSource)
             it.prepare()
-        }
-
-        // register our meta data listener
-        player?.addMetadataOutput { metadata ->
-            processIcyMetaData(metadata)
         }
 
         createPlayerNotificationManager(coverImageUrl)
@@ -350,33 +344,21 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
             playbackStatus = if (playWhenReady) PlaybackStatus.PLAYING else PlaybackStatus.PAUSED
     }
 
-    private fun processIcyMetaData(metadata: Metadata) {
-        val length = metadata.length()
-        if (length > 0) {
-            val entry = metadata[0]
-            if (entry is IcyInfo) {
-                val icyInfo = entry as IcyInfo
-                val info = icyInfo.title
-                    ?.split(" - ")
-                    ?.map { it.trim().replace("-", " ") }
-                    ?.filter { it.isNotEmpty() }
-                info?.let {
-//                    logger.info("MetadataOutput ---------- ${info.joinToString(separator = " - ")}")
-
-                    notificationTitle = if (info.isNotEmpty()) info[0] else ""
-                    notificationSubTitle = if (info.size > 1) info.subList(1, info.size)
-                        .joinToString(separator = " - ") else ""
-
-                    playerNotificationManager?.invalidate()
-                    reEmmitMetaData()
-                }
+    private fun createPlayerEventListener(): Player.Listener {
+        return object : Player.Listener {
+            override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
+                super.onMediaMetadataChanged(mediaMetadata)
+                // register our meta data listener
+                processMetaData(mediaMetadata.title.toString(), mediaMetadata.subtitle.toString())
             }
-        }
-    }
 
-    private fun createPlayerEventListener(): Player.EventListener {
-        return object : Player.EventListener {
+            override fun onMetadata(metadata: Metadata) {
+                super.onMetadata(metadata)
+                // register our meta data listener
+                processIcyMetaData(metadata)
+            }
 
+            @Deprecated("Deprecated in Java")
             override fun onPlayerStateChanged(playWhenReady: Boolean, playbackState: Int) {
                 logger.info("onPlayerStateChanged:  $playbackState")
                 playbackStatus = when (playbackState) {
@@ -402,18 +384,59 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
                     requestAudioFocus()
                 } else {
                     logger.info("Remove player as a foreground notification...")
-                    stopForeground(false)
+
+                    stopForegroundService()
                 }
                 logger.info("onPlayerStateChanged: $playbackStatus")
 
             }
 
-            override fun onPlayerError(error: ExoPlaybackException) {
+            override fun onPlayerError(error: PlaybackException) {
+                super.onPlayerError(error)
                 pushEvent(FLUTTER_RADIO_PLAYER_ERROR)
                 playbackStatus = PlaybackStatus.ERROR
                 error.printStackTrace()
             }
+
+
         }
+    }
+
+    private fun stopForegroundService() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_DETACH)
+        } else {
+            stopForeground(true)
+        }
+    }
+
+    private fun processIcyMetaData(metadata: Metadata) {
+        val length = metadata.length()
+        if (length > 0) {
+            val entry = metadata[0]
+            if (entry is IcyInfo) {
+                val info = entry.title
+                    ?.split(" - ")
+                    ?.map { it.trim().replace("-", " ") }
+                    ?.filter { it.isNotEmpty() }
+                info?.let {
+
+                    val title = if (info.isNotEmpty()) info[0] else ""
+                    val subTitle = if (info.size > 1) info.subList(1, info.size)
+                        .joinToString(separator = " - ") else ""
+
+                    processMetaData(title, subTitle)
+                }
+            }
+        }
+    }
+
+    private fun processMetaData(title: String, subTitle: String) {
+        notificationTitle = title
+        notificationSubTitle = subTitle
+
+        playerNotificationManager?.invalidate()
+        reEmmitMetaData()
     }
 
     private fun requestAudioFocus() {
@@ -429,64 +452,75 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
     }
 
     private fun createPlayerNotificationManager(coverImageUrl: String?) {
-        playerNotificationManager = PlayerNotificationManager.createWithNotificationChannel(
+        playerNotificationManager = PlayerNotificationManager.Builder(
             this@StreamingCore,
-            playbackChannelId,
-            R.string.channel_name,
-            R.string.channel_description,
             playbackNotificationId,
-            object : PlayerNotificationManager.MediaDescriptionAdapter {
-
-                override fun getCurrentContentTitle(player: Player): String {
-                    return notificationTitle
-                }
-
-                @Nullable
-                override fun createCurrentContentIntent(player: Player): PendingIntent {
-                    val i = Intent(this@StreamingCore, activityJavaClass!!)
-                    val contentPendingIntent =
-                        PendingIntent.getActivity(this@StreamingCore, 0, i, 0);
-                    return contentPendingIntent
-                }
-
-                @Nullable
-                override fun getCurrentContentText(player: Player): String? {
-                    return notificationSubTitle
-                }
-
-                @Nullable
-                override fun getCurrentLargeIcon(
-                    player: Player,
-                    callback: PlayerNotificationManager.BitmapCallback
-                ): Bitmap? {
-                    if (coverImageUrl != null) {
-                        loadCoverImageFromUrl(coverImageUrl, callback)
+            playbackChannelId,
+        )
+            .setChannelNameResourceId(R.string.channel_name)
+            .setChannelDescriptionResourceId(R.string.channel_description)
+            .setNotificationListener(
+                object : PlayerNotificationManager.NotificationListener {
+                    override fun onNotificationCancelled(
+                        notificationId: Int,
+                        dismissedByUser: Boolean
+                    ) {
+                        stop()
                     }
 
-                    return loadLocalBitmap(MANIFEST_NOTIFICATION_PLACEHOLDER)
-                }
+                    override fun onNotificationPosted(
+                        notificationId: Int,
+                        notification: Notification,
+                        ongoing: Boolean
+                    ) {
+                        startForeground(notificationId, notification)
+                    }
+                },
+            )
+            .setMediaDescriptionAdapter(
+                object : PlayerNotificationManager.MediaDescriptionAdapter {
 
-            },
-            object : PlayerNotificationManager.NotificationListener {
-                override fun onNotificationCancelled(
-                    notificationId: Int,
-                    dismissedByUser: Boolean
-                ) {
-                    stop()
-                }
+                    override fun getCurrentContentTitle(player: Player): String {
+                        return notificationTitle
+                    }
 
-                override fun onNotificationPosted(
-                    notificationId: Int,
-                    notification: Notification,
-                    ongoing: Boolean
-                ) {
-                    startForeground(notificationId, notification)
-//                        if (!ongoing) {
-//                            stopForeground(false)
-//                        }
-                }
-            }
-        )
+                    override fun createCurrentContentIntent(player: Player): PendingIntent {
+                        val i = Intent(this@StreamingCore, activityJavaClass!!)
+                        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            PendingIntent.getActivity(
+                                this@StreamingCore,
+                                0,
+                                i,
+                                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                            )
+                        } else {
+                            PendingIntent.getActivity(
+                                this@StreamingCore,
+                                0,
+                                i,
+                                0
+                            )
+                        }
+                    }
+
+                    override fun getCurrentContentText(player: Player): String {
+                        return notificationSubTitle
+                    }
+
+                    override fun getCurrentLargeIcon(
+                        player: Player,
+                        callback: PlayerNotificationManager.BitmapCallback
+                    ): Bitmap? {
+                        if (coverImageUrl != null) {
+                            loadCoverImageFromUrl(coverImageUrl, callback)
+                        }
+
+                        return loadLocalBitmap(MANIFEST_NOTIFICATION_PLACEHOLDER)
+                    }
+
+                },
+            )
+            .build()
     }
 
     private fun loadCoverImageFromUrl(
@@ -673,16 +707,16 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
      * Build the media source depending of the URL content type.
      */
     private fun buildMediaSource(
-        dataSourceFactory: DefaultDataSourceFactory,
+        dataSourceFactory: DefaultDataSource.Factory,
         streamUrl: String
     ): MediaSource {
 
         val uri = Uri.parse(streamUrl)
 
         return when (Util.inferContentType(uri)) {
-            C.TYPE_DASH -> DashMediaSource.Factory(dataSourceFactory)
+            C.CONTENT_TYPE_DASH -> DashMediaSource.Factory(dataSourceFactory)
                 .createMediaSource(MediaItem.fromUri(uri))
-            C.TYPE_HLS -> HlsMediaSource.Factory(dataSourceFactory)
+            C.CONTENT_TYPE_HLS -> HlsMediaSource.Factory(dataSourceFactory)
                 .createMediaSource(MediaItem.fromUri(uri))
             else -> ProgressiveMediaSource.Factory(dataSourceFactory)
 //                    .setContinueLoadingCheckIntervalBytes(1024*32)
