@@ -216,7 +216,14 @@ class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware
             logger.info("Service not bound, binding now....")
             val isRunning = isMyServiceRunning(StreamingCore::class.java)
             if (isRunning) {
-                launchPlayerIntentWithAction(StreamingCore.ACTION_RE_EMMIT_EVENTS)
+                applicationContext.bindService(
+                    Intent(
+                        applicationContext,
+                        StreamingCore::class.java
+                    ).also { it.action = StreamingCore.ACTION_RE_EMMIT_EVENTS },
+                    serviceConnection,
+                    Context.BIND_IMPORTANT,
+                )
             } else {
                 val serviceIntent = createInitIntentData(
                     Intent(applicationContext, StreamingCore::class.java),
