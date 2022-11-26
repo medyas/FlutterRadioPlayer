@@ -259,8 +259,8 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
 
     private fun stop() {
         player?.stop()
-        stopSelf()
         isBound = false
+        stopSelf()
     }
 
     private fun setTitle(title: String, subTitle: String) {
@@ -465,8 +465,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
                         notificationId: Int,
                         dismissedByUser: Boolean
                     ) {
-                        if(dismissedByUser)
-                        stop()
+                            stop()
                     }
 
                     override fun onNotificationPosted(
