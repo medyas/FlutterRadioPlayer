@@ -16,6 +16,7 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.EventChannel.EventSink
 import io.flutter.plugin.common.EventChannel.StreamHandler
 import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel.Result
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.PluginRegistry.Registrar
@@ -28,7 +29,6 @@ import kotlin.concurrent.schedule
 
 
 /** FlutterRadioPlayerPlugin */
-@Suppress("DEPRECATION")
 class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     private lateinit var activityJavaClass: Class<Activity>
     private var logger = Logger.getLogger(FlutterRadioPlayerPlugin::javaClass.name)
@@ -55,7 +55,7 @@ class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware
         @JvmStatic
         fun registerWith(registrar: Registrar) {
             val instance = FlutterRadioPlayerPlugin()
-            instance.buildEngine(registrar.activeContext()!!, registrar.messenger()!!)
+            instance.buildEngine(registrar.activeContext(), registrar.messenger())
         }
 
         /**
@@ -73,11 +73,11 @@ class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware
     }
 
 
-    override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
+    override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         buildEngine(flutterPluginBinding.applicationContext, flutterPluginBinding.binaryMessenger)
     }
 
-    override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
+    override fun onMethodCall( call: MethodCall, result: Result) {
         logger.info("Calling to method: " + call.method)
         when (call.method) {
             PlayerMethods.IS_PLAYING.value -> {
@@ -133,7 +133,7 @@ class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware
 
     }
 
-    override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
+    override fun onDetachedFromEngine( binding: FlutterPlugin.FlutterPluginBinding) {
         methodChannel.setMethodCallHandler(null)
         applicationContext = binding.applicationContext
         launchPlayerIntentWithAction(StreamingCore.ACTION_DESTROY)
@@ -243,6 +243,7 @@ class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware
         }
     }
 
+    @Suppress("DEPRECATION")
     private fun isMyServiceRunning(serviceClass: Class<*>): Boolean {
         val manager = getSystemService(applicationContext, ActivityManager::class.java)
         for (service in manager!!.getRunningServices(Int.MAX_VALUE)) {
