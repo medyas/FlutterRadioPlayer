@@ -248,11 +248,9 @@ class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware
         val manager = getSystemService(applicationContext, ActivityManager::class.java)
         for (service in manager!!.getRunningServices(Int.MAX_VALUE)) {
             if (serviceClass.name == service.service.className) {
-                Log.i("Service status", "Running")
                 return true
             }
         }
-        Log.i("Service status", "Not running")
         return false
     }
 
@@ -351,7 +349,9 @@ class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware
             isBound = true
             logger.info("Service Connection Established...")
             logger.info("Service bounded...")
-
+            Timer("SettingUp", false).schedule(500) {
+                launchPlayerIntentWithAction(StreamingCore.ACTION_RE_EMMIT_EVENTS)
+            }
         }
     }
 

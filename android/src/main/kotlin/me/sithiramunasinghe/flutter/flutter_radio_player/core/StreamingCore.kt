@@ -252,9 +252,10 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
     }
 
     fun isPlaying(): Boolean {
-        return if (this@StreamingCore::playbackStatus.isInitialized)
-            playbackStatus == PlaybackStatus.PLAYING
-        else false
+        return player?.isPlaying ?: false
+//        return if (this@StreamingCore::playbackStatus.isInitialized)
+//            playbackStatus == PlaybackStatus.PLAYING
+//        else false
     }
 
     private fun stop() {
@@ -465,7 +466,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
                         notificationId: Int,
                         dismissedByUser: Boolean
                     ) {
-                            stop()
+                        stop()
                     }
 
                     override fun onNotificationPosted(
