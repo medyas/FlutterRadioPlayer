@@ -465,6 +465,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
                         notificationId: Int,
                         dismissedByUser: Boolean
                     ) {
+                        if(dismissedByUser)
                         stop()
                     }
 

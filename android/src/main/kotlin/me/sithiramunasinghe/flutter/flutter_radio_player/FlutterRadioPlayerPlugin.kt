@@ -1,9 +1,12 @@
 package me.sithiramunasinghe.flutter.flutter_radio_player
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.content.*
 import android.os.IBinder
+import android.util.Log
 import androidx.annotation.NonNull
+import androidx.core.content.ContextCompat.getSystemService
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -15,7 +18,6 @@ import io.flutter.plugin.common.EventChannel.StreamHandler
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
-import io.flutter.plugin.common.MethodChannel.Result
 import io.flutter.plugin.common.PluginRegistry.Registrar
 import me.sithiramunasinghe.flutter.flutter_radio_player.core.PlayerItem
 import me.sithiramunasinghe.flutter.flutter_radio_player.core.StreamingCore
@@ -26,6 +28,7 @@ import kotlin.concurrent.schedule
 
 
 /** FlutterRadioPlayerPlugin */
+@Suppress("DEPRECATION")
 class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     private lateinit var activityJavaClass: Class<Activity>
     private var logger = Logger.getLogger(FlutterRadioPlayerPlugin::javaClass.name)
@@ -66,7 +69,7 @@ class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware
         const val methodChannelName = "flutter_radio_player"
         const val playbackEventChannelName = methodChannelName + "_playback_status_stream"
         const val metadataEventChannelName = methodChannelName + "_metadata_stream"
-        const val volumeEventChannelName = methodChannelName+ "_volume_stream"
+        const val volumeEventChannelName = methodChannelName + "_volume_stream"
     }
 
 
@@ -211,14 +214,38 @@ class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware
 
         if (!isBound) {
             logger.info("Service not bound, binding now....")
-            val serviceIntent = createInitIntentData(Intent(applicationContext, StreamingCore::class.java), buildPlayerDetailsMeta(methodCall))
-            applicationContext.bindService(serviceIntent, serviceConnection, Context.BIND_IMPORTANT)
-            applicationContext.startService(serviceIntent)
+            val isRunning = isMyServiceRunning(StreamingCore::class.java)
+            if (isRunning) {
+                launchPlayerIntentWithAction(StreamingCore.ACTION_RE_EMMIT_EVENTS)
+            } else {
+                val serviceIntent = createInitIntentData(
+                    Intent(applicationContext, StreamingCore::class.java),
+                    buildPlayerDetailsMeta(methodCall)
+                )
+                applicationContext.bindService(
+                    serviceIntent,
+                    serviceConnection,
+                    Context.BIND_IMPORTANT
+                )
+                applicationContext.startService(serviceIntent)
+            }
         } else {
             Timer("SettingUp", false).schedule(500) {
                 launchPlayerIntentWithAction(StreamingCore.ACTION_RE_EMMIT_EVENTS)
             }
         }
+    }
+
+    private fun isMyServiceRunning(serviceClass: Class<*>): Boolean {
+        val manager = getSystemService(applicationContext, ActivityManager::class.java)
+        for (service in manager!!.getRunningServices(Int.MAX_VALUE)) {
+            if (serviceClass.name == service.service.className) {
+                Log.i("Service status", "Running")
+                return true
+            }
+        }
+        Log.i("Service status", "Not running")
+        return false
     }
 
 
@@ -291,7 +318,11 @@ class FlutterRadioPlayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware
     }
 
     private fun launchPlayerIntentWithAction(action: String) {
-        applicationContext.startService(Intent(applicationContext, StreamingCore::class.java).also { it.action = action })
+        applicationContext.startService(
+            Intent(
+                applicationContext,
+                StreamingCore::class.java
+            ).also { it.action = action })
     }
 
 
