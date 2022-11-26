@@ -151,7 +151,7 @@ class StreamingCore : Service(), AudioManager.OnAudioFocusChangeListener {
                 ACTION_STOP -> stop()
                 ACTION_DESTROY -> {
                     if (player == null || !isPlaying()) {
-                        onDestroy()
+                        stop()
                     }
                 }
                 ACTION_NEW_PLAYER -> newPlay()
